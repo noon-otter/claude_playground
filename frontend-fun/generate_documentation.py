@@ -4,31 +4,30 @@ Generate documentation from Domino governance bundles
 """
 import os
 import sys
-import json
-from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
-from pathlib import Path
+from datetime import datetime
 import requests
 
 # Configuration
 DOMINO_DOMAIN = os.environ.get("DOMINO_DOMAIN", "se-demo.domino.tech")
 DOMINO_API_KEY = os.environ.get("DOMINO_USER_API_KEY", "")
 DOMINO_PROJECT_ID = os.environ.get("DOMINO_PROJECT_ID", "")
-OUTPUT_FILE = os.environ.get("OUTPUT_FILE", "/mnt/artifacts/governance_qa_data.json")
 
 
 def parse_timestamp(timestamp_str):
     """Parse ISO timestamp with robust error handling"""
-    if not timestamp_str:
-        return datetime.min.replace(tzinfo=timezone.utc)
     try:
         # Handle Z suffix
-        if timestamp_str.endswith("Z"):
-            return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        return datetime.fromisoformat(timestamp_str)
+        ts = timestamp_str.replace("Z", "+00:00")
+        # Ensure microseconds are exactly 6 digits
+        if "." in ts and "+" in ts:
+            before_dot, after_dot = ts.split(".")
+            microseconds, tz = after_dot.split("+")
+            microseconds = microseconds[:6].ljust(6, "0")
+            ts = f"{before_dot}.{microseconds}+{tz}"
+        return datetime.fromisoformat(ts)
     except Exception as e:
         print(f"Warning: Failed to parse timestamp '{timestamp_str}': {e}")
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return None
 
 
 def get_bundles(project_id):
@@ -69,254 +68,66 @@ def get_results(bundle_id):
         return []
 
 
-def fetch_policy(policy_id: str) -> Dict:
-    """Fetch policy definition to get artifact questions."""
-    domain = DOMINO_DOMAIN.removeprefix("https://").removeprefix("http://")
-    url = f"https://{domain}/api/governance/v1/policies/{policy_id}"
-    headers = {
-        "accept": "application/json",
-        "X-Domino-Api-Key": DOMINO_API_KEY
-    }
-
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        print(f"Error fetching policy {policy_id}: {e}", file=sys.stderr)
-        return {}
-
-
-def build_artifact_map(policy: Dict) -> Dict[str, Dict]:
-    """Build mapping of artifact_id -> {question, evidence_name, stage_name} from policy."""
-    artifact_map = {}
-
-    for stage in policy.get('stages', []):
-        stage_name = stage.get('name', '')
-
-        # Process evidence sets
-        for evidence in stage.get('evidenceSet', []):
-            evidence_name = evidence.get('name', '')
-            for artifact in evidence.get('artifacts', []):
-                artifact_id = artifact.get('id')
-                if artifact_id:
-                    # Get question from details.label, fallback to evidence name
-                    question = artifact.get('details', {}).get('label', evidence_name)
-                    artifact_map[artifact_id] = {
-                        'question': question,
-                        'evidence_name': evidence_name,
-                        'stage_name': stage_name
-                    }
-
-        # Process approvals
-        for approval in stage.get('approvals', []):
-            evidence = approval.get('evidence', {})
-            evidence_name = evidence.get('name', '')
-            for artifact in evidence.get('artifacts', []):
-                artifact_id = artifact.get('id')
-                if artifact_id:
-                    question = artifact.get('details', {}).get('label', evidence_name)
-                    artifact_map[artifact_id] = {
-                        'question': question,
-                        'evidence_name': evidence_name,
-                        'stage_name': stage_name
-                    }
-
-    return artifact_map
-
-
-def fetch_bundle_results(bundle_id: str, policy_ids: List[str]) -> List[Dict]:
-    """Fetch published results for all policies within a bundle."""
-    domain = DOMINO_DOMAIN.removeprefix("https://").removeprefix("http://")
-    headers = {
-        "accept": "application/json",
-        "X-Domino-Api-Key": DOMINO_API_KEY
-    }
-    all_results = []
-
-    for pid in policy_ids:
-        url = f"https://{domain}/api/governance/v1/results/latest"
-        params = {'bundleID': bundle_id, 'policyID': pid}
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-            results = response.json() or []
-            all_results.extend(results)
-        except requests.RequestException as e:
-            print(f"Error fetching results for bundle {bundle_id}, policy {pid}: {e}", file=sys.stderr)
-            continue
-
-    return all_results
-
-
-def extract_bundle_qa(bundle: Dict, results: List[Dict], artifact_map: Dict[str, Dict]) -> Dict:
-    """Extract all Q&A from bundle results with questions mapped."""
-    bundle_id = bundle.get('id')
-    bundle_name = bundle.get('name', 'Unnamed')
-
-    all_qa = []
-    policy_ids = set()
-
-    # Get policy IDs from bundle
-    for policy in bundle.get('policies', []):
-        policy_id = policy.get('policyId')
-        if policy_id:
-            policy_ids.add(policy_id)
-
-    # Process each result
-    for result in results:
-        artifact_id = result.get('artifactId', '')
-        evidence_id = result.get('evidenceId', '')
-
-        # Get question and metadata from artifact map
-        artifact_info = artifact_map.get(artifact_id, {})
-        question = artifact_info.get('question', '')
-        evidence_name = artifact_info.get('evidence_name', '')
-        stage_name = artifact_info.get('stage_name', '')
-
-        # artifactContent IS the answer - it can be string, list, dict, etc.
-        answer = result.get('artifactContent')
-
-        # Get creator info
-        created_by = result.get('createdBy', {})
-        created_by_name = f"{created_by.get('firstName', '')} {created_by.get('lastName', '')}".strip()
-        created_by_username = created_by.get('userName', '')
-
-        all_qa.append({
-            'bundle_id': bundle_id,
-            'bundle_name': bundle_name,
-            'stage_name': stage_name,
-            'evidence_id': evidence_id,
-            'evidence_name': evidence_name,
-            'artifact_id': artifact_id,
-            'question': question,
-            'answer': answer,
-            'answer_type': '',  # Not available in results
-            'created_at': result.get('createdAt', ''),
-            'created_by_name': created_by_name,
-            'created_by_username': created_by_username,
-            'is_latest': result.get('isLatest', True)
-        })
-
-    return {
-        'bundle_id': bundle_id,
-        'bundle_name': bundle_name,
-        'bundle_state': bundle.get('state', ''),
-        'bundle_updated_at': bundle.get('updatedAt', ''),
-        'total_policies': len(policy_ids),
-        'total_qa_pairs': len(all_qa),
-        'qa_data': all_qa
-    }
-
-
-def bundle_latest_time(bundle_data: Dict) -> datetime:
-    """
-    For a given bundle data dict, return the most recent created_at timestamp
-    from any of its QA data entries.
-    """
-    qa_data = bundle_data.get("qa_data") or []
-    qa_times = [parse_timestamp(qa.get("created_at")) for qa in qa_data if qa.get("created_at")]
-
-    if not qa_times:
-        return datetime.min.replace(tzinfo=timezone.utc)
-
-    # Return the latest aware UTC datetime
-    return max(qa_times)
-
-
 def main():
-    """Main function to extract Q&A data from Domino Governance bundles."""
     if not DOMINO_PROJECT_ID:
         print("Error: DOMINO_PROJECT_ID environment variable is not set", file=sys.stderr)
         sys.exit(1)
 
-    if not DOMINO_API_KEY:
-        print("Error: DOMINO_USER_API_KEY environment variable is not set", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Starting Q&A extraction for project: {DOMINO_PROJECT_ID}")
-
-    # Fetch bundles
     bundles = get_bundles(DOMINO_PROJECT_ID)
-    if not bundles:
-        print("No bundles found")
-        return []
+    print(f"Retrieved {len(bundles)} bundles\n")
 
-    print(f"Fetched {len(bundles)} bundles")
+    bundle_latest_updates = {}
+    bundle_info = {}
 
-    # Collect unique policy IDs from bundles
-    print("\nCollecting policy IDs from bundles...")
-    policy_ids = set()
     for bundle in bundles:
-        for policy in bundle.get('policies', []):
-            policy_id = policy.get('policyId')
-            if policy_id:
-                policy_ids.add(policy_id)
+        bundle_id = bundle["id"]
+        bundle_name = bundle["name"]
+        policy_id = bundle.get("policyId")
 
-    print(f"Found {len(policy_ids)} unique policies")
+        bundle_info[bundle_id] = {
+            "name": bundle_name,
+            "policy_id": policy_id
+        }
 
-    # Fetch all policies and build artifact map
-    print("\nFetching policy definitions...")
-    artifact_map = {}
-    for policy_id in policy_ids:
-        print(f"  Fetching policy: {policy_id}")
-        policy = fetch_policy(policy_id)
-        if policy:
-            policy_artifacts = build_artifact_map(policy)
-            artifact_map.update(policy_artifacts)
-            print(f"    Added {len(policy_artifacts)} artifacts")
+        results = get_results(bundle_id)
 
-    print(f"\nBuilt question mapping for {len(artifact_map)} artifacts")
+        if results:
+            parsed_timestamps = [
+                parse_timestamp(r["createdAt"])
+                for r in results
+            ]
+            valid_timestamps = [ts for ts in parsed_timestamps if ts is not None]
 
-    # Process each bundle
-    all_bundle_data = []
-    for bundle in bundles:
-        bundle_id = bundle.get('id')
-        bundle_name = bundle.get('name', 'Unnamed')
+            if valid_timestamps:
+                latest_created_at = max(valid_timestamps)
+                bundle_latest_updates[bundle_id] = {
+                    "name": bundle_name,
+                    "policy_id": policy_id,
+                    "latest_update": latest_created_at
+                }
+                print(f"Bundle: {bundle_name}")
+                print(f"  Latest update: {latest_created_at}")
+            else:
+                print(f"Bundle: {bundle_name}")
+                print(f"  No valid timestamps found")
+        else:
+            print(f"Bundle: {bundle_name}")
+            print(f"  No results found")
+        print()
 
-        print(f"\nProcessing bundle: {bundle_name} ({bundle_id})")
+    if bundle_latest_updates:
+        most_recent_bundle_id = max(
+            bundle_latest_updates.items(),
+            key=lambda x: x[1]["latest_update"]
+        )
 
-        # Fetch results
-        policy_ids_list = [p.get("policyId") for p in bundle.get("policies", []) if p.get("policyId")]
-        results = fetch_bundle_results(bundle_id, policy_ids_list)
-        print(f"  Found {len(results)} result entries")
-
-        # Extract Q&A with questions
-        bundle_data = extract_bundle_qa(bundle, results, artifact_map)
-        all_bundle_data.append(bundle_data)
-
-        print(f"  Extracted {bundle_data['total_qa_pairs']} Q&A pairs")
-
-    # Summary
-    total_qa = sum(b['total_qa_pairs'] for b in all_bundle_data)
-    print(f"\nExtraction complete:")
-    print(f"  Total bundles: {len(all_bundle_data)}")
-    print(f"  Total Q&A pairs: {total_qa}")
-
-    # Filter to keep only the bundle with the most recent Q&A data
-    bundles_with_qa = [b for b in all_bundle_data if b['total_qa_pairs'] > 0]
-
-    if not bundles_with_qa:
-        print("\nNo bundles with Q&A data found")
-        return []
-
-    # Find bundle with most recent created_at timestamp
-    most_recent_bundle = max(bundles_with_qa, key=bundle_latest_time)
-
-    print(f"\nFiltering to most recent bundle:")
-    print(f"  Bundle: {most_recent_bundle['bundle_name']}")
-    print(f"  Q&A pairs: {most_recent_bundle['total_qa_pairs']}")
-
-    # Save to JSON file
-    output_path = Path(OUTPUT_FILE)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump([most_recent_bundle], f, indent=2, ensure_ascii=False)
-
-    print(f"\nData saved to: {output_path}")
-
-    return [most_recent_bundle]
+        print("=" * 80)
+        print("MOST RECENTLY UPDATED BUNDLE:")
+        print(f"  ID: {most_recent_bundle_id[0]}")
+        print(f"  Name: {most_recent_bundle_id[1]['name']}")
+        print(f"  Policy ID: {most_recent_bundle_id[1]['policy_id']}")
+        print(f"  Latest Update: {most_recent_bundle_id[1]['latest_update']}")
+        print("=" * 80)
 
 
 if __name__ == "__main__":
