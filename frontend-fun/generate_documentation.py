@@ -22,9 +22,18 @@ def parse_timestamp(timestamp_str):
     if not timestamp_str:
         return datetime.min.replace(tzinfo=timezone.utc)
     try:
-        # Handle Z suffix
+        # Handle Z suffix and normalize microseconds to 6 digits
         if timestamp_str.endswith("Z"):
-            return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            ts = timestamp_str[:-1]  # Remove Z
+            # Pad microseconds to 6 digits if present
+            if "." in ts:
+                before_dot, after_dot = ts.rsplit(".", 1)
+                # Pad or truncate microseconds to exactly 6 digits
+                after_dot = after_dot.ljust(6, "0")[:6]
+                ts = f"{before_dot}.{after_dot}+00:00"
+            else:
+                ts = f"{ts}+00:00"
+            return datetime.fromisoformat(ts)
         return datetime.fromisoformat(timestamp_str)
     except Exception as e:
         print(f"Warning: Failed to parse timestamp '{timestamp_str}': {e}")
