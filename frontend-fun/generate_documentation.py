@@ -16,7 +16,6 @@ DOMINO_PROJECT_ID = os.environ.get("DOMINO_PROJECT_ID", "")
 def parse_timestamp(timestamp_str):
     """Parse ISO timestamp with robust error handling"""
     try:
-
         # Handle Z suffix
         ts = timestamp_str.replace("Z", "+00:00")
         # Ensure microseconds are exactly 6 digits
