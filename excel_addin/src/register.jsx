@@ -1,0 +1,13 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import RegisterModal from './taskpane/RegisterModal';
+
+// Wait for Office to be ready
+Office.onReady(() => {
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(
+    <React.StrictMode>
+      <RegisterModal />
+    </React.StrictMode>
+  );
+});
