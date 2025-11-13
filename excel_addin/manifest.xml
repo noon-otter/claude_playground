@@ -80,40 +80,6 @@
                   </Action>
                 </Control>
 
-                <!-- Mark as Input Button -->
-                <Control xsi:type="Button" id="MarkInputButton">
-                  <Label resid="MarkInputButton.Label"/>
-                  <Supertip>
-                    <Title resid="MarkInputButton.Label"/>
-                    <Description resid="MarkInputButton.Tooltip"/>
-                  </Supertip>
-                  <Icon>
-                    <bt:Image size="16" resid="Icon.16x16"/>
-                    <bt:Image size="32" resid="Icon.32x32"/>
-                    <bt:Image size="80" resid="Icon.80x80"/>
-                  </Icon>
-                  <Action xsi:type="ExecuteFunction">
-                    <FunctionName>markAsInput</FunctionName>
-                  </Action>
-                </Control>
-
-                <!-- Mark as Output Button -->
-                <Control xsi:type="Button" id="MarkOutputButton">
-                  <Label resid="MarkOutputButton.Label"/>
-                  <Supertip>
-                    <Title resid="MarkOutputButton.Label"/>
-                    <Description resid="MarkOutputButton.Tooltip"/>
-                  </Supertip>
-                  <Icon>
-                    <bt:Image size="16" resid="Icon.16x16"/>
-                    <bt:Image size="32" resid="Icon.32x32"/>
-                    <bt:Image size="80" resid="Icon.80x80"/>
-                  </Icon>
-                  <Action xsi:type="ExecuteFunction">
-                    <FunctionName>markAsOutput</FunctionName>
-                  </Action>
-                </Control>
-
                 <!-- Show Dashboard Button -->
                 <Control xsi:type="Button" id="ShowDashboardButton">
                   <Label resid="ShowDashboardButton.Label"/>
@@ -153,19 +119,15 @@
         <bt:Url id="RegisterModal.Url" DefaultValue="https://localhost:3000/register.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="Domino Governance"/>
-        <bt:String id="DominoGroup.Label" DefaultValue="Domino"/>
+        <bt:String id="GetStarted.Title" DefaultValue="Excel Model Tracker"/>
+        <bt:String id="DominoGroup.Label" DefaultValue="Model Tracker"/>
         <bt:String id="RegisterButton.Label" DefaultValue="Register Model"/>
-        <bt:String id="MarkInputButton.Label" DefaultValue="Mark Input"/>
-        <bt:String id="MarkOutputButton.Label" DefaultValue="Mark Output"/>
         <bt:String id="ShowDashboardButton.Label" DefaultValue="Dashboard"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="Excel model governance and monitoring"/>
-        <bt:String id="RegisterButton.Tooltip" DefaultValue="Register this model with Domino for governance tracking"/>
-        <bt:String id="MarkInputButton.Tooltip" DefaultValue="Mark selected cells as input variables to monitor"/>
-        <bt:String id="MarkOutputButton.Tooltip" DefaultValue="Mark selected cells as output variables to monitor"/>
-        <bt:String id="ShowDashboardButton.Tooltip" DefaultValue="View all monitored cells and activity"/>
+        <bt:String id="GetStarted.Description" DefaultValue="Track and monitor Excel workbook changes"/>
+        <bt:String id="RegisterButton.Tooltip" DefaultValue="Register this workbook as a tracked model"/>
+        <bt:String id="ShowDashboardButton.Tooltip" DefaultValue="View tracked ranges and change history"/>
       </bt:LongStrings>
     </Resources>
 
