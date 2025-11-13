@@ -28,3 +28,8 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+
+# Runtime files
+backend.log
+excel_addin.db
+*.db

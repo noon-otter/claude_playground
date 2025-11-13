@@ -82,7 +82,14 @@ function RegisterModal() {
     e.preventDefault();
     setError(null);
 
+    console.log('[RegisterModal] ========================================');
+    console.log('[RegisterModal] FORM SUBMISSION STARTED');
+    console.log('[RegisterModal] Model ID:', modelId);
+    console.log('[RegisterModal] Model Name:', modelName);
+    console.log('[RegisterModal] Tracked Ranges:', trackedRanges);
+
     if (!modelName.trim()) {
+      console.warn('[RegisterModal] Validation failed: Model name is required');
       setError('Model name is required');
       return;
     }
@@ -90,14 +97,24 @@ function RegisterModal() {
     // Validate tracked ranges
     const validRanges = trackedRanges.filter(r => r.name.trim() && r.range.trim());
     if (validRanges.length !== trackedRanges.length) {
+      console.warn('[RegisterModal] Validation failed: Empty tracked range fields');
       setError('Please fill in all tracked range fields or remove empty ones');
       return;
     }
 
     setIsSubmitting(true);
+    console.log('[RegisterModal] Setting isSubmitting to TRUE - button should show spinner');
 
     try {
-      console.log('[RegisterModal] Registering model...');
+      console.log('[RegisterModal] ✅ Validation passed');
+      console.log('[RegisterModal] 📡 Calling API: PUT /wb/upsert-model');
+      console.log('[RegisterModal] Request payload:', {
+        model_name: modelName,
+        tracked_ranges: validRanges,
+        model_id: modelId
+      });
+
+      const startTime = Date.now();
 
       // Register model with tracked ranges
       const config = await upsertModel({
@@ -105,22 +122,48 @@ function RegisterModal() {
         tracked_ranges: validRanges,
         model_id: modelId
       });
-      console.log('[RegisterModal] Model registered:', config);
+
+      const duration = Date.now() - startTime;
+      console.log(`[RegisterModal] ✅ API call completed in ${duration}ms`);
+      console.log('[RegisterModal] Response:', config);
 
       // Save model name in document properties
+      console.log('[RegisterModal] 💾 Saving model name to document properties...');
       await setModelName(modelName);
+      console.log('[RegisterModal] ✅ Model name saved');
 
       // Send success message to parent (commands.js)
-      console.log('[RegisterModal] Notifying parent...');
-      Office.context.ui.messageParent(JSON.stringify({
+      console.log('[RegisterModal] 📤 Notifying parent window...');
+      const message = {
         action: 'registered',
         config
-      }));
+      };
+      console.log('[RegisterModal] Message to parent:', message);
+
+      Office.context.ui.messageParent(JSON.stringify(message));
+      console.log('[RegisterModal] ✅ SUCCESS - Parent notified, dialog should close');
 
     } catch (error) {
-      console.error('[RegisterModal] Registration failed:', error);
-      setError(error.message || 'Failed to register model. Check console for details.');
+      console.error('[RegisterModal] ❌ REGISTRATION FAILED');
+      console.error('[RegisterModal] Error type:', error.constructor.name);
+      console.error('[RegisterModal] Error message:', error.message);
+      console.error('[RegisterModal] Full error:', error);
+
+      // Provide more helpful error messages
+      let errorMessage = error.message || 'Failed to register model';
+
+      if (error.message?.includes('timeout') || error.message?.includes('Request timeout')) {
+        errorMessage = 'Backend server is not responding. Please ensure the backend is running on port 5000.';
+      } else if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+        errorMessage = 'Cannot connect to backend server. Please ensure the backend is running on http://localhost:5000';
+      } else if (error.message?.includes('CORS')) {
+        errorMessage = 'CORS error - backend server may need CORS configuration.';
+      }
+
+      console.error('[RegisterModal] User-friendly error:', errorMessage);
+      setError(errorMessage);
       setIsSubmitting(false);
+      console.log('[RegisterModal] Setting isSubmitting to FALSE - button should be enabled again');
     }
   }
 

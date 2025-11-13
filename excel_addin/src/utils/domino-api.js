@@ -48,7 +48,15 @@ function fetchWithTimeout(url, options = {}, timeout = API_TIMEOUT) {
  */
 export async function upsertModel(data) {
   try {
-    console.log('[domino-api] PUT /wb/upsert-model', data);
+    console.log('[domino-api] ========================================');
+    console.log('[domino-api] PUT /wb/upsert-model');
+    console.log('[domino-api] API Base URL:', DOMINO_API_BASE);
+    console.log('[domino-api] Full URL:', `${DOMINO_API_BASE}/wb/upsert-model`);
+    console.log('[domino-api] Request data:', data);
+    console.log('[domino-api] Timeout:', API_TIMEOUT, 'ms');
+
+    const requestStart = Date.now();
+    console.log('[domino-api] 🚀 Sending request...');
 
     const response = await fetchWithTimeout(`${DOMINO_API_BASE}/wb/upsert-model`, {
       method: 'PUT',
@@ -58,16 +66,37 @@ export async function upsertModel(data) {
       body: JSON.stringify(data)
     });
 
+    const requestDuration = Date.now() - requestStart;
+    console.log(`[domino-api] 📡 Response received in ${requestDuration}ms`);
+    console.log('[domino-api] Response status:', response.status, response.statusText);
+    console.log('[domino-api] Response ok:', response.ok);
+
     if (!response.ok) {
-      throw new Error(`Upsert failed: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('[domino-api] ❌ Response not OK');
+      console.error('[domino-api] Error response body:', errorText);
+      throw new Error(`Upsert failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
+    console.log('[domino-api] 📥 Parsing JSON response...');
     const result = await response.json();
-    console.log('[domino-api] Upsert result:', result);
+    console.log('[domino-api] ✅ Upsert successful!');
+    console.log('[domino-api] Result:', result);
 
     return result;
   } catch (error) {
-    console.error('[domino-api] Failed to upsert model:', error);
+    console.error('[domino-api] ❌ UPSERT FAILED');
+    console.error('[domino-api] Error type:', error.constructor.name);
+    console.error('[domino-api] Error message:', error.message);
+    console.error('[domino-api] Stack trace:', error.stack);
+
+    // Add more context to the error
+    if (error.message === 'Request timeout') {
+      error.message = `Request timeout after ${API_TIMEOUT}ms - Backend server may not be running on ${DOMINO_API_BASE}`;
+    } else if (error.message.includes('Failed to fetch')) {
+      error.message = `Network error: Cannot connect to ${DOMINO_API_BASE} - Is the backend server running?`;
+    }
+
     throw error;
   }
 }
