@@ -19,16 +19,21 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Determine docker compose command
+if command_exists docker-compose; then
+    DOCKER_COMPOSE="docker-compose"
+elif docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+else
+    echo -e "${RED}Error: Neither 'docker-compose' nor 'docker compose' is available${NC}"
+    exit 1
+fi
+
 # Check required tools
 echo -e "${BLUE}Checking required tools...${NC}"
 
 if ! command_exists docker; then
     echo -e "${RED}Error: Docker is not installed${NC}"
-    exit 1
-fi
-
-if ! command_exists docker-compose; then
-    echo -e "${RED}Error: docker-compose is not installed${NC}"
     exit 1
 fi
 
@@ -47,12 +52,12 @@ echo ""
 
 # Step 1: Start PostgreSQL
 echo -e "${BLUE}Step 1: Starting PostgreSQL database...${NC}"
-docker-compose up -d
+$DOCKER_COMPOSE up -d
 
 # Wait for PostgreSQL to be healthy
 echo -e "${YELLOW}Waiting for PostgreSQL to be ready...${NC}"
 for i in {1..30}; do
-    if docker-compose exec -T postgres pg_isready -U excel_user -d excel_addin >/dev/null 2>&1; then
+    if $DOCKER_COMPOSE exec -T postgres pg_isready -U excel_user -d excel_addin >/dev/null 2>&1; then
         echo -e "${GREEN}✓ PostgreSQL is ready${NC}"
         break
     fi

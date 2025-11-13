@@ -12,7 +12,7 @@ Database Tables:
   - workbook_trace: Trace log entries
 
 Install:
-    pip install fastapi uvicorn psycopg2-binary python-multipart
+    pip install fastapi uvicorn psycopg[binary] python-multipart
 
 Run:
     python backend.py
@@ -26,8 +26,8 @@ from datetime import datetime
 import logging
 import json
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 from contextlib import contextmanager
 
 # Configure logging
@@ -65,7 +65,7 @@ DB_CONFIG = {
 @contextmanager
 def get_db():
     """Database connection context manager"""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = psycopg.connect(**DB_CONFIG)
     try:
         yield conn
         conn.commit()
@@ -171,7 +171,7 @@ def upsert_model(request: UpsertModelRequest):
     Creates new model or updates existing model with version increment.
     """
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             tracked_ranges_json = json.dumps([r.dict() for r in request.tracked_ranges])
 
             # Case 1: No model_id provided - create new model
@@ -243,7 +243,7 @@ def load_model(model_id: str = Query(..., description="Model ID to load")):
     Load model metadata by model_id.
     """
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("""
                 SELECT model_id, model_name, version, tracked_ranges
                 FROM workbook_model
@@ -274,7 +274,7 @@ def create_model_trace(request: CreateTraceRequest):
     Create a trace log entry when a tracked range changes.
     """
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             # Verify model exists
             cur.execute("SELECT model_name FROM workbook_model WHERE model_id = %s", (request.model_id,))
             model = cur.fetchone()
@@ -313,7 +313,7 @@ def create_model_trace_batch(request: CreateTraceBatchRequest):
     Batch version for multiple tracked range changes at once.
     """
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             # Verify model exists
             cur.execute("SELECT model_name FROM workbook_model WHERE model_id = %s", (request.model_id,))
             model = cur.fetchone()
@@ -353,7 +353,7 @@ def create_model_trace_batch(request: CreateTraceBatchRequest):
 def get_all_models():
     """Get all registered models (for admin/debugging)"""
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("""
                 SELECT model_id, model_name, version, tracked_ranges, created_at, updated_at
                 FROM workbook_model
@@ -366,7 +366,7 @@ def get_all_models():
 def get_model_traces(model_id: str, limit: int = Query(50, description="Max traces to return")):
     """Get recent traces for a model (for debugging)"""
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("SELECT 1 FROM workbook_model WHERE model_id = %s", (model_id,))
             if not cur.fetchone():
                 raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
@@ -386,7 +386,7 @@ def get_model_traces(model_id: str, limit: int = Query(50, description="Max trac
 def get_all_traces(limit: int = Query(100, description="Max traces to return")):
     """Get all traces (for debugging)"""
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("""
                 SELECT trace_id, model_id, timestamp, tracked_range_name, username, value, created_at
                 FROM workbook_trace
