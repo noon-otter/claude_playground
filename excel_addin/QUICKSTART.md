@@ -7,9 +7,24 @@ This Excel Add-In tracks changes to specified cell ranges in your workbook and s
 ## Prerequisites
 
 - Docker & Docker Compose
-- Python 3.8+
+- **Python 3.11 or 3.12** (required for stability)
 - Node.js 16+
 - Excel (Desktop or Microsoft 365)
+
+### Installing Python 3.12 (Recommended)
+
+**macOS:**
+```bash
+brew install python@3.12
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt install python3.12 python3.12-venv
+```
+
+**Windows:**
+Download from [python.org](https://www.python.org/downloads/) and select version 3.12.x
 
 ## 🚀 One-Command Startup
 
