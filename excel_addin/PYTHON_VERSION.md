@@ -1,12 +1,13 @@
-# Python Version Compatibility
+# Python Version Requirements
 
-## Recommended Python Versions
+## ⚠️ REQUIRED: Python 3.11 or 3.12 Only
 
-For best stability, use:
-- **Python 3.11** (most stable)
-- **Python 3.12** (recommended)
+This project **requires** Python 3.11 or 3.12 for stability.
 
-Avoid Python 3.13+ for now as some dependencies may have compatibility issues.
+- ✅ **Python 3.11** (most stable)
+- ✅ **Python 3.12** (recommended)
+- ❌ **Python 3.13+** (not supported - will be rejected by dev.sh)
+- ❌ **Python 3.10 and below** (not supported)
 
 ## Your Current Python Version
 

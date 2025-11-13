@@ -49,20 +49,52 @@ fi
 
 echo -e "${GREEN}✓ All required tools found${NC}"
 
-# Check Python version
-PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
-PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+# Check Python version - REQUIRE 3.11 or 3.12
+PYTHON_CMD="python3"
 
-echo -e "${BLUE}Python version: ${PYTHON_VERSION}${NC}"
+# Try to find Python 3.12 or 3.11
+if command_exists python3.12; then
+    PYTHON_CMD="python3.12"
+    PYTHON_VERSION="3.12"
+elif command_exists python3.11; then
+    PYTHON_CMD="python3.11"
+    PYTHON_VERSION="3.11"
+else
+    # Check if default python3 is 3.11 or 3.12
+    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+    PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+    PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
 
-if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 13 ]; then
-    echo -e "${YELLOW}⚠️  Warning: Python 3.13+ detected. For best compatibility, consider using Python 3.11 or 3.12${NC}"
-    echo -e "${YELLOW}   You can install a stable version with: brew install python@3.12${NC}"
-    echo -e "${YELLOW}   Then use: python3.12 -m venv venv${NC}"
-    echo ""
+    if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -eq 11 ]; then
+        PYTHON_CMD="python3"
+        PYTHON_VERSION="3.11"
+    elif [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -eq 12 ]; then
+        PYTHON_CMD="python3"
+        PYTHON_VERSION="3.12"
+    else
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${RED}ERROR: Python 3.11 or 3.12 required${NC}"
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}Your Python version: ${PYTHON_VERSION}${NC}"
+        echo ""
+        echo -e "${BLUE}Please install Python 3.11 or 3.12:${NC}"
+        echo ""
+        echo -e "  ${GREEN}Option 1: Install Python 3.12 (Recommended)${NC}"
+        echo -e "    macOS:  brew install python@3.12"
+        echo -e "    Ubuntu: sudo apt install python3.12 python3.12-venv"
+        echo ""
+        echo -e "  ${GREEN}Option 2: Install Python 3.11${NC}"
+        echo -e "    macOS:  brew install python@3.11"
+        echo -e "    Ubuntu: sudo apt install python3.11 python3.11-venv"
+        echo ""
+        echo -e "  ${GREEN}Then rerun this script:${NC}"
+        echo -e "    ./dev.sh"
+        echo ""
+        exit 1
+    fi
 fi
 
+echo -e "${GREEN}✓ Using Python ${PYTHON_VERSION} (${PYTHON_CMD})${NC}"
 echo ""
 
 # Step 1: Start PostgreSQL
@@ -89,8 +121,8 @@ echo ""
 echo -e "${BLUE}Step 2: Setting up Python backend...${NC}"
 
 if [ ! -d "venv" ]; then
-    echo "Creating Python virtual environment..."
-    python3 -m venv venv
+    echo "Creating Python virtual environment with ${PYTHON_CMD}..."
+    $PYTHON_CMD -m venv venv
 fi
 
 echo "Activating virtual environment..."

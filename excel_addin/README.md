@@ -1,143 +1,145 @@
-# Excel Governance Add-in
+# Excel Model Tracker - Add-In POC
 
-Architecture-compliant implementation per [DEPLOYMENT.md](DEPLOYMENT.md).
+A standalone Excel Add-In that tracks changes to cell ranges and stores them in PostgreSQL.
 
-## 🚀 Quick Start
+## ⚠️ Python Version Requirement
 
-# Create virtual environment (first time only)
-python3 -m venv venv
+**This project requires Python 3.11 or 3.12.**
 
-# Activate virtual environment
-source venv/bin/activate
+Other versions are not supported and will be rejected by the startup script.
 
-# Install dependencies (first time only)
-pip install fastapi uvicorn
+### Quick Install
 
-# Start backend
-python backend.py
-# Runs on http://localhost:5000
-# Create virtual environment (first time only)
-python3 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies (first time only)
-pip install fastapi uvicorn
-
-# Start backend
-python backend.py
-# Runs on http://localhost:5000
-# Create virtual environment (first time only)
-python3 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies (first time only)
-pip install fastapi uvicorn
-
-# Start backend
-python backend.py
-# Runs on http://localhost:5000
-# Create virtual environment (first time only)
-python3 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies (first time only)
-pip install fastapi uvicorn
-
-# Start backend
-python backend.py
-# Runs on http://localhost:5000
-# Create virtual environment (first time only)
-python3 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies (first time only)
-pip install fastapi uvicorn
-
-# Start backend
-python backend.py
-# Runs on http://localhost:5000
-# Create virtual environment (first time only)
-python3 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies (first time only)
-pip install fastapi uvicorn
-
-# Start backend
-python backend.py
-# Runs on http://localhost:5000
-
-### 2. Start Frontend
+**macOS:**
 ```bash
-npm install
-npm start
-# Runs on https://localhost:3000
+brew install python@3.12
 ```
 
-### 3. Test in Excel
-- Open Excel (Windows or Mac)
-- Load the add-in from `https://localhost:3000`
-- Click "Register Model" to start
+**Ubuntu/Debian:**
+```bash
+sudo apt install python3.12 python3.12-venv
+```
 
-## 📁 Project Structure
+## Quick Start
+
+```bash
+cd excel_addin
+
+# The script will automatically detect and use Python 3.11 or 3.12
+./dev.sh
+```
+
+That's it! The script will:
+1. ✅ Verify you have Python 3.11 or 3.12
+2. ✅ Start PostgreSQL database (Docker)
+3. ✅ Create Python virtual environment
+4. ✅ Install all dependencies
+5. ✅ Start backend on http://localhost:5000
+6. ✅ Start frontend on https://localhost:3000
+
+## What It Does
+
+- **Register workbooks** with a unique model ID
+- **Define tracked ranges** (e.g., "Revenue: Sheet1!A1:D10")
+- **Monitor changes** to those ranges in real-time
+- **Log all changes** to PostgreSQL with:
+  - Timestamp
+  - User (from Office 365)
+  - Range name
+  - Cell value
+
+## Documentation
+
+- **[QUICKSTART.md](QUICKSTART.md)** - Detailed setup and usage guide
+- **[PYTHON_VERSION.md](PYTHON_VERSION.md)** - Python version troubleshooting
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and API specs
+
+## Architecture
+
+```
+Excel Add-In (JavaScript)
+    ↓
+FastAPI Backend (Python)
+    ↓
+PostgreSQL Database
+```
+
+## Project Structure
 
 ```
 excel_addin/
-├── backend.py                    # FastAPI backend
-├── database_schema.sql           # SQL DDL
+├── backend.py              # FastAPI backend with PostgreSQL
+├── docker-compose.yml      # PostgreSQL container
+├── init-db.sql            # Database schema
+├── dev.sh                 # Unified startup script
+├── requirements.txt       # Python dependencies
+├── manifest.xml           # Excel Add-in manifest
 ├── src/
-│   ├── commands/commands.js      # Background monitoring
-│   ├── taskpane/                 # React UI
-│   ├── utils/domino-api.js       # API client
-│   └── types/model.ts            # TypeScript types
-└── docs/
-    ├── DEPLOYMENT.md             # Architecture spec
-    └── MIGRATION_GUIDE.md        # Reference guide
+│   ├── commands/          # Background scripts (Office.js)
+│   ├── taskpane/          # React UI components
+│   └── utils/             # API client, model ID management
+└── public/                # Static assets (icons)
 ```
 
-## 🎯 Architecture
+## Development
 
-### API Endpoints
-- `PUT /wb/upsert-model` - Create/update model (with versioning)
-- `GET /wb/load-model` - Load model by ID
-- `POST /wb/create-model-trace` - Log tracked range change
-
-### Data Model
-```typescript
-WorkbookModel {
-  model_name: string
-  tracked_ranges: [{name: string, range: string}]
-  model_id: string
-  version: int
-}
-```
-
-## 🗄️ Database
-
+### View Logs
 ```bash
-sqlcmd -S your-server -d your-database -i database_schema.sql
+tail -f backend.log    # Backend API logs
+tail -f frontend.log   # React dev server logs
 ```
 
-Creates:
-- `dbo.workbook_model` - Model metadata
-- `dbo.workbook_trace` - Trace logs
+### Access Database
+```bash
+docker compose exec postgres psql -U excel_user -d excel_addin
 
-## 📖 Documentation
+# Query models
+SELECT * FROM workbook_model;
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Architecture specification
-- **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** - Reference & testing
-- **[ARCHITECTURE_COMPLIANCE.md](ARCHITECTURE_COMPLIANCE.md)** - Compliance report
+# Query traces
+SELECT * FROM workbook_trace ORDER BY timestamp DESC LIMIT 10;
+```
 
-## ✅ Status
+### Stop Services
+```bash
+# Press Ctrl+C to stop dev.sh
 
-**100% architecture compliant** - All components match the specification exactly.
+# Stop database
+docker compose down
+
+# Clean slate (deletes all data)
+docker compose down -v
+```
+
+## Troubleshooting
+
+### "Python 3.11 or 3.12 required"
+The dev.sh script detected the wrong Python version. Install Python 3.12:
+```bash
+brew install python@3.12
+rm -rf venv
+./dev.sh
+```
+
+### "Port already in use"
+```bash
+lsof -ti:3000 | xargs kill -9   # Kill frontend
+lsof -ti:5000 | xargs kill -9   # Kill backend
+```
+
+### Add-in not loading in Excel
+1. Clear Excel cache
+2. Restart Excel
+3. Re-run: `bash install_addin_locally.sh`
+
+## Support
+
+For issues, check:
+- `backend.log` - Backend API logs
+- `frontend.log` - React logs
+- Browser console (F12) - Frontend errors
+- Excel add-in diagnostics
+
+---
+
+**Built for Excel model governance and change tracking**
