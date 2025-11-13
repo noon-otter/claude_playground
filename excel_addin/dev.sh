@@ -48,6 +48,21 @@ if ! command_exists npm; then
 fi
 
 echo -e "${GREEN}✓ All required tools found${NC}"
+
+# Check Python version
+PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+
+echo -e "${BLUE}Python version: ${PYTHON_VERSION}${NC}"
+
+if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 13 ]; then
+    echo -e "${YELLOW}⚠️  Warning: Python 3.13+ detected. For best compatibility, consider using Python 3.11 or 3.12${NC}"
+    echo -e "${YELLOW}   You can install a stable version with: brew install python@3.12${NC}"
+    echo -e "${YELLOW}   Then use: python3.12 -m venv venv${NC}"
+    echo ""
+fi
+
 echo ""
 
 # Step 1: Start PostgreSQL
