@@ -1,6 +1,6 @@
 """
-Domino Spreadsheet Backend - Architecture-Compliant Implementation
-Implements the exact API specification from DEPLOYMENT.md
+Excel Add-In Backend - PostgreSQL Implementation
+Implements the exact API specification with PostgreSQL persistence
 
 Endpoints:
   PUT  /wb/upsert-model         - Create or update a model (with versioning)
@@ -8,14 +8,14 @@ Endpoints:
   POST /wb/create-model-trace   - Create trace log entry
 
 Database Tables:
-  - dbo.workbook_model: Model metadata and tracked ranges
-  - dbo.workbook_trace: Trace log entries
+  - workbook_model: Model metadata and tracked ranges
+  - workbook_trace: Trace log entries
 
 Install:
-    pip install fastapi uvicorn python-multipart
+    pip install fastapi uvicorn psycopg2-binary python-multipart
 
 Run:
-    uvicorn domino-api-backend:app --reload --port 5000
+    python backend.py
 """
 
 from fastapi import FastAPI, HTTPException, Query
@@ -25,15 +25,19 @@ from typing import List, Optional, Any
 from datetime import datetime
 import logging
 import json
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from contextlib import contextmanager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Domino Spreadsheet Backend",
-    description="Excel Add-In Backend per DEPLOYMENT.md Architecture",
-    version="1.0.0"
+    title="Excel Add-In Backend",
+    description="PostgreSQL-backed Excel Add-In for Model Tracking",
+    version="2.0.0"
 )
 
 # Enable CORS for local development
@@ -46,18 +50,34 @@ app.add_middleware(
 )
 
 # =====================================================
-# IN-MEMORY DATABASE (Replace with SQL Server)
+# DATABASE CONNECTION
 # =====================================================
-# In production, replace these with actual SQL queries to:
-# - dbo.workbook_model
-# - dbo.workbook_trace
 
-workbook_model_db = {}  # Key: model_id, Value: WorkbookModel
-workbook_trace_db = []  # List of WorkbookTrace entries
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": int(os.getenv("DB_PORT", "5432")),
+    "database": os.getenv("DB_NAME", "excel_addin"),
+    "user": os.getenv("DB_USER", "excel_user"),
+    "password": os.getenv("DB_PASSWORD", "excel_pass"),
+}
+
+
+@contextmanager
+def get_db():
+    """Database connection context manager"""
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
 
 # =====================================================
-# PYDANTIC MODELS (Match TypeScript interfaces)
+# PYDANTIC MODELS
 # =====================================================
 
 class TrackedRange(BaseModel):
@@ -67,7 +87,7 @@ class TrackedRange(BaseModel):
 
 
 class WorkbookModel(BaseModel):
-    """Complete model stored in dbo.workbook_model"""
+    """Complete model stored in workbook_model table"""
     model_name: str
     tracked_ranges: List[TrackedRange]
     model_id: str
@@ -82,11 +102,6 @@ class UpsertModelRequest(BaseModel):
     version: Optional[int] = None
 
 
-class LoadModelRequest(BaseModel):
-    """Query params for GET /wb/load-model"""
-    model_id: str
-
-
 class CreateTraceRequest(BaseModel):
     """Request body for POST /wb/create-model-trace (single change)"""
     model_id: str
@@ -97,7 +112,7 @@ class CreateTraceRequest(BaseModel):
 
 
 class CreateTraceBatchRequest(BaseModel):
-    """Request body for POST /wb/create-model-trace (batch)"""
+    """Request body for POST /wb/create-model-trace-batch (batch)"""
     model_id: str
     timestamp: str
     changes: List[dict]  # [{"tracked_range_name": str, "value": Any}]
@@ -110,24 +125,42 @@ class CreateTraceResponse(BaseModel):
 
 
 # =====================================================
-# API ENDPOINTS (Per Architecture Specification)
+# API ENDPOINTS
 # =====================================================
 
 @app.get("/")
 def root():
     """Health check and service info"""
-    return {
-        "service": "Domino Spreadsheet Backend",
-        "version": "1.0.0",
-        "architecture": "DEPLOYMENT.md compliant",
-        "endpoints": {
-            "upsert": "PUT /wb/upsert-model",
-            "load": "GET /wb/load-model",
-            "trace": "POST /wb/create-model-trace"
-        },
-        "models_count": len(workbook_model_db),
-        "traces_count": len(workbook_trace_db)
-    }
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM workbook_model")
+                models_count = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM workbook_trace")
+                traces_count = cur.fetchone()[0]
+
+        return {
+            "service": "Excel Add-In Backend",
+            "version": "2.0.0",
+            "database": "PostgreSQL",
+            "status": "healthy",
+            "endpoints": {
+                "upsert": "PUT /wb/upsert-model",
+                "load": "GET /wb/load-model",
+                "trace": "POST /wb/create-model-trace"
+            },
+            "models_count": models_count,
+            "traces_count": traces_count
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "service": "Excel Add-In Backend",
+            "version": "2.0.0",
+            "database": "PostgreSQL",
+            "status": "unhealthy",
+            "error": str(e)
+        }
 
 
 @app.put("/wb/upsert-model", response_model=WorkbookModel)
@@ -135,77 +168,71 @@ def upsert_model(request: UpsertModelRequest):
     """
     PUT /wb/upsert-model
 
-    Used for:
-    - Creating a new model
-    - Updating a model's name/tracked ranges
-    - Returning versioned model metadata
-
-    Behavior:
-    - If no model_id provided → create new model, generate new model_id
-    - If model_id exists → update and increment version
-    - If provided model_id doesn't exist → create new model
-
-    Request:
-        {
-          "model_name": string,
-          "tracked_ranges": TrackedRange[],
-          "model_id": string (optional),
-          "version": int (optional)
-        }
-
-    Response:
-        {
-          "model_name": string,
-          "tracked_ranges": TrackedRange[],
-          "model_id": string,
-          "version": int
-        }
+    Creates new model or updates existing model with version increment.
     """
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            tracked_ranges_json = json.dumps([r.dict() for r in request.tracked_ranges])
 
-    # Case 1: Create new model (no model_id provided)
-    if not request.model_id:
-        model_id = generate_model_id()
-        model = WorkbookModel(
-            model_name=request.model_name,
-            tracked_ranges=request.tracked_ranges,
-            model_id=model_id,
-            version=1
-        )
-        workbook_model_db[model_id] = model.dict()
+            # Case 1: No model_id provided - create new model
+            if not request.model_id:
+                model_id = generate_model_id()
+                cur.execute("""
+                    INSERT INTO workbook_model (model_id, model_name, version, tracked_ranges)
+                    VALUES (%s, %s, %s, %s::jsonb)
+                    RETURNING model_id, model_name, version, tracked_ranges
+                """, (model_id, request.model_name, 1, tracked_ranges_json))
 
-        logger.info(f"✅ Created new model: {model.model_name} ({model_id}) v1")
+                row = cur.fetchone()
+                logger.info(f"✅ Created new model: {request.model_name} ({model_id}) v1")
 
-        return model
+                return WorkbookModel(
+                    model_id=row['model_id'],
+                    model_name=row['model_name'],
+                    version=row['version'],
+                    tracked_ranges=[TrackedRange(**r) for r in row['tracked_ranges']]
+                )
 
-    # Case 2: Update existing model
-    if request.model_id in workbook_model_db:
-        existing = workbook_model_db[request.model_id]
-        new_version = existing["version"] + 1
+            # Case 2: model_id provided - check if exists
+            cur.execute("SELECT version FROM workbook_model WHERE model_id = %s", (request.model_id,))
+            existing = cur.fetchone()
 
-        model = WorkbookModel(
-            model_name=request.model_name,
-            tracked_ranges=request.tracked_ranges,
-            model_id=request.model_id,
-            version=new_version
-        )
-        workbook_model_db[request.model_id] = model.dict()
+            if existing:
+                # Update existing model and increment version
+                new_version = existing['version'] + 1
+                cur.execute("""
+                    UPDATE workbook_model
+                    SET model_name = %s, tracked_ranges = %s::jsonb, version = %s
+                    WHERE model_id = %s
+                    RETURNING model_id, model_name, version, tracked_ranges
+                """, (request.model_name, tracked_ranges_json, new_version, request.model_id))
 
-        logger.info(f"🔄 Updated model: {model.model_name} ({request.model_id}) v{existing['version']} → v{new_version}")
+                row = cur.fetchone()
+                logger.info(f"🔄 Updated model: {request.model_name} ({request.model_id}) v{existing['version']} → v{new_version}")
 
-        return model
+                return WorkbookModel(
+                    model_id=row['model_id'],
+                    model_name=row['model_name'],
+                    version=row['version'],
+                    tracked_ranges=[TrackedRange(**r) for r in row['tracked_ranges']]
+                )
+            else:
+                # Create new model with provided ID
+                cur.execute("""
+                    INSERT INTO workbook_model (model_id, model_name, version, tracked_ranges)
+                    VALUES (%s, %s, %s, %s::jsonb)
+                    RETURNING model_id, model_name, version, tracked_ranges
+                """, (request.model_id, request.model_name, 1, tracked_ranges_json))
 
-    # Case 3: model_id provided but doesn't exist → create new
-    model = WorkbookModel(
-        model_name=request.model_name,
-        tracked_ranges=request.tracked_ranges,
-        model_id=request.model_id,
-        version=1
-    )
-    workbook_model_db[request.model_id] = model.dict()
+                row = cur.fetchone()
+                logger.info(f"✅ Created model with provided ID: {request.model_name} ({request.model_id}) v1")
 
-    logger.info(f"✅ Created model with provided ID: {model.model_name} ({request.model_id}) v1")
-
-    return model
+                return WorkbookModel(
+                    model_id=row['model_id'],
+                    model_name=row['model_name'],
+                    version=row['version'],
+                    tracked_ranges=[TrackedRange(**r) for r in row['tracked_ranges']]
+                )
 
 
 @app.get("/wb/load-model", response_model=WorkbookModel)
@@ -213,29 +240,30 @@ def load_model(model_id: str = Query(..., description="Model ID to load")):
     """
     GET /wb/load-model?model_id={model_id}
 
-    Used for:
-    - Loading metadata for an existing model
-
-    Request:
-        Query param: model_id
-
-    Response:
-        {
-          "model_name": string,
-          "tracked_ranges": TrackedRange[],
-          "model_id": string,
-          "version": int
-        }
+    Load model metadata by model_id.
     """
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT model_id, model_name, version, tracked_ranges
+                FROM workbook_model
+                WHERE model_id = %s
+            """, (model_id,))
 
-    if model_id not in workbook_model_db:
-        logger.warning(f"❌ Model not found: {model_id}")
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+            row = cur.fetchone()
 
-    model = WorkbookModel(**workbook_model_db[model_id])
-    logger.info(f"📂 Loaded model: {model.model_name} ({model_id}) v{model.version}")
+            if not row:
+                logger.warning(f"❌ Model not found: {model_id}")
+                raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
 
-    return model
+            logger.info(f"📂 Loaded model: {row['model_name']} ({model_id}) v{row['version']}")
+
+            return WorkbookModel(
+                model_id=row['model_id'],
+                model_name=row['model_name'],
+                version=row['version'],
+                tracked_ranges=[TrackedRange(**r) for r in row['tracked_ranges']]
+            )
 
 
 @app.post("/wb/create-model-trace", response_model=CreateTraceResponse)
@@ -243,58 +271,38 @@ def create_model_trace(request: CreateTraceRequest):
     """
     POST /wb/create-model-trace
 
-    Triggered when a tracked range changes.
-
-    Request (Single Change):
-        {
-          "model_id": string,
-          "timestamp": string,
-          "tracked_range_name": string,
-          "username": string,
-          "value": any
-        }
-
-    Response:
-        {
-          "success": bool
-        }
-
-    Note: The backend may also support a batch version:
-        {
-          "model_id": string,
-          "timestamp": string,
-          "changes": [{"tracked_range_name": string, "value": any}],
-          "username": string
-        }
+    Create a trace log entry when a tracked range changes.
     """
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Verify model exists
+            cur.execute("SELECT model_name FROM workbook_model WHERE model_id = %s", (request.model_id,))
+            model = cur.fetchone()
 
-    # Verify model exists
-    if request.model_id not in workbook_model_db:
-        logger.warning(f"❌ Trace rejected: Model not found: {request.model_id}")
-        raise HTTPException(status_code=404, detail=f"Model not found: {request.model_id}")
+            if not model:
+                logger.warning(f"❌ Trace rejected: Model not found: {request.model_id}")
+                raise HTTPException(status_code=404, detail=f"Model not found: {request.model_id}")
 
-    # Store trace
-    trace = {
-        "model_id": request.model_id,
-        "timestamp": request.timestamp,
-        "tracked_range_name": request.tracked_range_name,
-        "username": request.username,
-        "value": request.value
-    }
-    workbook_trace_db.append(trace)
+            # Insert trace
+            value_json = json.dumps(request.value) if request.value is not None else None
+            cur.execute("""
+                INSERT INTO workbook_trace (model_id, timestamp, tracked_range_name, username, value)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                request.model_id,
+                request.timestamp,
+                request.tracked_range_name,
+                request.username,
+                value_json
+            ))
 
-    model = workbook_model_db[request.model_id]
-    logger.info(
-        f"📝 Trace recorded: {model['model_name']} | "
-        f"{request.tracked_range_name} = {request.value} | "
-        f"by {request.username}"
-    )
+            logger.info(
+                f"📝 Trace recorded: {model['model_name']} | "
+                f"{request.tracked_range_name} = {request.value} | "
+                f"by {request.username}"
+            )
 
-    # In production: INSERT INTO dbo.workbook_trace
-    # INSERT INTO dbo.workbook_trace (model_id, timestamp, tracked_range_name, username, value)
-    # VALUES (@model_id, @timestamp, @tracked_range_name, @username, @value)
-
-    return CreateTraceResponse(success=True)
+            return CreateTraceResponse(success=True)
 
 
 @app.post("/wb/create-model-trace-batch", response_model=CreateTraceResponse)
@@ -303,48 +311,38 @@ def create_model_trace_batch(request: CreateTraceBatchRequest):
     POST /wb/create-model-trace-batch
 
     Batch version for multiple tracked range changes at once.
-
-    Request:
-        {
-          "model_id": string,
-          "timestamp": string,
-          "changes": [
-              {"tracked_range_name": string, "value": any},
-              {"tracked_range_name": string, "value": any}
-          ],
-          "username": string
-        }
-
-    Response:
-        {
-          "success": bool
-        }
     """
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Verify model exists
+            cur.execute("SELECT model_name FROM workbook_model WHERE model_id = %s", (request.model_id,))
+            model = cur.fetchone()
 
-    # Verify model exists
-    if request.model_id not in workbook_model_db:
-        logger.warning(f"❌ Batch trace rejected: Model not found: {request.model_id}")
-        raise HTTPException(status_code=404, detail=f"Model not found: {request.model_id}")
+            if not model:
+                logger.warning(f"❌ Batch trace rejected: Model not found: {request.model_id}")
+                raise HTTPException(status_code=404, detail=f"Model not found: {request.model_id}")
 
-    # Store all traces
-    for change in request.changes:
-        trace = {
-            "model_id": request.model_id,
-            "timestamp": request.timestamp,
-            "tracked_range_name": change["tracked_range_name"],
-            "username": request.username,
-            "value": change["value"]
-        }
-        workbook_trace_db.append(trace)
+            # Insert all traces
+            for change in request.changes:
+                value_json = json.dumps(change.get("value"))
+                cur.execute("""
+                    INSERT INTO workbook_trace (model_id, timestamp, tracked_range_name, username, value)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    request.model_id,
+                    request.timestamp,
+                    change["tracked_range_name"],
+                    request.username,
+                    value_json
+                ))
 
-    model = workbook_model_db[request.model_id]
-    logger.info(
-        f"📦 Batch trace recorded: {model['model_name']} | "
-        f"{len(request.changes)} changes | "
-        f"by {request.username}"
-    )
+            logger.info(
+                f"📦 Batch trace recorded: {model['model_name']} | "
+                f"{len(request.changes)} changes | "
+                f"by {request.username}"
+            )
 
-    return CreateTraceResponse(success=True)
+            return CreateTraceResponse(success=True)
 
 
 # =====================================================
@@ -354,27 +352,49 @@ def create_model_trace_batch(request: CreateTraceBatchRequest):
 @app.get("/wb/models")
 def get_all_models():
     """Get all registered models (for admin/debugging)"""
-    return list(workbook_model_db.values())
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT model_id, model_name, version, tracked_ranges, created_at, updated_at
+                FROM workbook_model
+                ORDER BY created_at DESC
+            """)
+            return cur.fetchall()
 
 
 @app.get("/wb/traces/{model_id}")
 def get_model_traces(model_id: str, limit: int = Query(50, description="Max traces to return")):
     """Get recent traces for a model (for debugging)"""
-    if model_id not in workbook_model_db:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT 1 FROM workbook_model WHERE model_id = %s", (model_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
 
-    model_traces = [t for t in workbook_trace_db if t["model_id"] == model_id]
-    model_traces.reverse()  # Most recent first
+            cur.execute("""
+                SELECT trace_id, model_id, timestamp, tracked_range_name, username, value, created_at
+                FROM workbook_trace
+                WHERE model_id = %s
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """, (model_id, limit))
 
-    return model_traces[:limit]
+            return cur.fetchall()
 
 
 @app.get("/wb/traces")
 def get_all_traces(limit: int = Query(100, description="Max traces to return")):
     """Get all traces (for debugging)"""
-    traces = workbook_trace_db.copy()
-    traces.reverse()  # Most recent first
-    return traces[:limit]
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT trace_id, model_id, timestamp, tracked_range_name, username, value, created_at
+                FROM workbook_trace
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """, (limit,))
+
+            return cur.fetchall()
 
 
 # =====================================================
@@ -389,39 +409,20 @@ def generate_model_id() -> str:
 
 
 # =====================================================
-# SQL SERVER INTEGRATION EXAMPLE
+# STARTUP
 # =====================================================
-"""
-To connect to SQL Server, install:
-    pip install pyodbc
 
-Example connection:
-    import pyodbc
-
-    conn = pyodbc.connect(
-        'DRIVER={ODBC Driver 17 for SQL Server};'
-        'SERVER=your-server.database.windows.net;'
-        'DATABASE=your-database;'
-        'UID=your-username;'
-        'PWD=your-password'
-    )
-
-    cursor = conn.cursor()
-
-    # Insert model
-    cursor.execute('''
-        INSERT INTO dbo.workbook_model (model_id, model_name, version, tracked_ranges)
-        VALUES (?, ?, ?, ?)
-    ''', (model_id, model_name, version, json.dumps([r.dict() for r in tracked_ranges])))
-
-    # Insert trace
-    cursor.execute('''
-        INSERT INTO dbo.workbook_trace (model_id, timestamp, tracked_range_name, username, value)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (model_id, timestamp, tracked_range_name, username, json.dumps(value)))
-
-    conn.commit()
-"""
+@app.on_event("startup")
+async def startup_event():
+    """Test database connection on startup"""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                logger.info("✅ Database connection successful")
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {e}")
+        logger.error("Make sure PostgreSQL is running: docker-compose up -d")
 
 
 if __name__ == "__main__":

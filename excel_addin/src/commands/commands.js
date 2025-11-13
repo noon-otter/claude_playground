@@ -150,112 +150,10 @@ async function showRegisterModal() {
 }
 
 // =====================================================
-// EVENT FLOW 3: User-Driven: Update Model (Add Tracked Range)
+// EVENT FLOW 3: User-Driven: Update Model
 // =====================================================
-
-/**
- * Ribbon command: Mark selected cells as input
- */
-async function markAsInput() {
-  await addTrackedRange('input');
-}
-
-/**
- * Ribbon command: Mark selected cells as output
- */
-async function markAsOutput() {
-  await addTrackedRange('output');
-}
-
-/**
- * Ribbon command: Add tracked range (with name prompt)
- */
-async function addTrackedRange(rangeType = null) {
-  try {
-    await Excel.run(async (context) => {
-      // Get selected range
-      const range = context.workbook.getSelectedRange();
-      range.load('address');
-      await context.sync();
-
-      // Prompt for range name
-      const defaultName = rangeType ? `${rangeType}_${range.address}` : range.address;
-      const rangeName = prompt(`Enter a name for the tracked range (${range.address}):`, defaultName);
-
-      if (!rangeName) {
-        console.log('User cancelled range naming');
-        return;
-      }
-
-      // EVENT: Update Model
-      // Call: PUT /wb/upsert-model (with model_id + version)
-      await updateModelAddRange(rangeName, range.address);
-
-      // Visual feedback - different colors for input/output
-      if (rangeType === 'input') {
-        range.format.fill.color = '#E8F5E9'; // Light green for inputs
-      } else if (rangeType === 'output') {
-        range.format.fill.color = '#FFF3E0'; // Light orange for outputs
-      } else {
-        range.format.fill.color = '#E3F2FD'; // Light blue for general
-      }
-      await context.sync();
-
-      console.log(`✅ Added tracked range: ${rangeName} (${range.address})`);
-    });
-  } catch (error) {
-    console.error('Failed to add tracked range:', error);
-  }
-}
-
-/**
- * PUT /wb/upsert-model
- * Add a new tracked range to the model
- */
-async function updateModelAddRange(rangeName, rangeAddress) {
-  if (!modelConfig) {
-    alert('Model is not registered. Please register the model first.');
-    return;
-  }
-
-  try {
-    // Add new tracked range
-    const newTrackedRange = {
-      name: rangeName,
-      range: rangeAddress
-    };
-
-    const updatedRanges = [...modelConfig.tracked_ranges, newTrackedRange];
-
-    const response = await fetch(`${DOMINO_API_BASE}/wb/upsert-model`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model_name: modelConfig.model_name,
-        tracked_ranges: updatedRanges,
-        model_id: modelConfig.model_id,
-        version: modelConfig.version
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Update failed: ${response.statusText}`);
-    }
-
-    const updatedModel = await response.json();
-    console.log('[updateModelAddRange] Model updated:', updatedModel);
-
-    // Update local config
-    modelConfig = updatedModel;
-
-    return updatedModel;
-  } catch (error) {
-    console.error('[updateModelAddRange] Error:', error);
-    throw error;
-  }
-}
+// Tracked ranges are managed through the Registration Modal
+// Users can update tracked ranges by re-opening the modal
 
 // =====================================================
 // EVENT FLOW 4: Event-Driven: On Tracked Range Changes
@@ -485,19 +383,85 @@ async function getModelIdForModal() {
 }
 
 /**
- * Get current user email
+ * Get current user identity from Office 365
+ * Tries multiple methods to extract user email/identity
  */
 function getUserEmail() {
   try {
-    // Try to get from Office context (not available in Excel, only Outlook)
-    if (Office.context.mailbox && Office.context.mailbox.userProfile) {
+    // Method 1: Office.context.mailbox (Outlook only)
+    if (Office.context.mailbox?.userProfile?.emailAddress) {
       return Office.context.mailbox.userProfile.emailAddress;
     }
 
-    // Try to get from document properties or environment
-    return Office.context.document?.displayName || 'unknown';
-  } catch {
-    return 'unknown';
+    // Method 2: Try to get from Office platform info
+    // This is a fallback - we'll try to get it asynchronously later
+    if (typeof OfficeRuntime !== 'undefined' && OfficeRuntime.auth) {
+      // Trigger async token fetch
+      getUserEmailAsync().then(email => {
+        if (email && email !== 'unknown') {
+          currentUsername = email;
+          console.log(`✅ Updated username from token: ${email}`);
+        }
+      }).catch(err => {
+        console.warn('Could not fetch user identity:', err);
+      });
+    }
+
+    // Method 3: Try Office.context.document info
+    const contextUser = Office.context?.document?.url;
+    if (contextUser && contextUser.includes('@')) {
+      // Sometimes the URL contains user info
+      const match = contextUser.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (match) {
+        return match[1];
+      }
+    }
+
+    // Fallback: use 'anonymous' as placeholder
+    return 'anonymous';
+  } catch (error) {
+    console.warn('Error getting user email:', error);
+    return 'anonymous';
+  }
+}
+
+/**
+ * Async method to get user email from Office 365 access token
+ */
+async function getUserEmailAsync() {
+  try {
+    if (typeof OfficeRuntime === 'undefined' || !OfficeRuntime.auth) {
+      return null;
+    }
+
+    // Get access token (requires Office 365)
+    const token = await OfficeRuntime.auth.getAccessToken({
+      allowSignInPrompt: false,
+      allowConsentPrompt: false,
+      forMSGraphAccess: true
+    });
+
+    // Parse JWT to extract email (simple parsing - not validating signature)
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+
+    const payload = JSON.parse(jsonPayload);
+
+    // Extract email from token claims
+    const email = payload.upn || payload.email || payload.unique_name || payload.preferred_username;
+
+    if (email) {
+      console.log(`🔐 Got user identity from token: ${email}`);
+      return email;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn('Could not get access token:', error.message);
+    return null;
   }
 }
 
@@ -506,7 +470,5 @@ function getUserEmail() {
 // =====================================================
 
 Office.actions.associate("showRegisterModal", showRegisterModal);
-Office.actions.associate("markAsInput", markAsInput);
-Office.actions.associate("markAsOutput", markAsOutput);
 
-console.log('📋 Command handlers registered (Architecture-Compliant v2)');
+console.log('📋 Command handlers registered');

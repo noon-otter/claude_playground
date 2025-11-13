@@ -5,11 +5,12 @@ import {
   Title3,
   Body1,
   Input,
-  Textarea,
   Button,
   Field,
-  Spinner
+  Spinner,
+  Card
 } from '@fluentui/react-components';
+import { Delete24Regular, Add24Regular } from '@fluentui/react-icons';
 import { upsertModel } from '../utils/domino-api';
 import { setModelName, getWorkbookName } from '../utils/model-id';
 import DebugPanel from '../components/DebugPanel';
@@ -17,90 +18,107 @@ import DebugPanel from '../components/DebugPanel';
 function RegisterModal() {
   const [modelId, setModelId] = useState('');
   const [modelName, setModelName] = useState('');
-  const [owner, setOwner] = useState('');
-  const [description, setDescription] = useState('');
+  const [trackedRanges, setTrackedRanges] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    console.log('[RegisterModal.jsx] Component mounted, initializing...');
+    console.log('[RegisterModal] Initializing...');
     initializeModal();
   }, []);
 
   async function initializeModal() {
-    console.log('[RegisterModal.jsx] initializeModal() started');
     try {
       // Get model ID from URL params
       const params = new URLSearchParams(window.location.search);
       const id = params.get('modelId');
-      console.log('[RegisterModal.jsx] Model ID from URL:', id);
+      console.log('[RegisterModal] Model ID:', id);
       setModelId(id);
 
-      // Pre-fill model name from workbook name
-      console.log('[RegisterModal.jsx] Getting workbook name...');
-      const workbookName = await getWorkbookName();
-      console.log('[RegisterModal.jsx] Workbook name:', workbookName);
-      setModelName(workbookName.replace('.xlsx', ''));
-
-      // Try to get user email from Office context
+      // Try to load existing model
       try {
-        const email = Office.context.mailbox?.userProfile?.emailAddress;
-        if (email) {
-          console.log('[RegisterModal.jsx] Got email from context:', email);
-          setOwner(email);
+        const response = await fetch(`http://localhost:5000/wb/load-model?model_id=${id}`);
+        if (response.ok) {
+          const model = await response.json();
+          console.log('[RegisterModal] Loaded existing model:', model);
+          setModelName(model.model_name);
+          setTrackedRanges(model.tracked_ranges || []);
+        } else {
+          // Model not registered yet, pre-fill model name from workbook name
+          const workbookName = await getWorkbookName();
+          console.log('[RegisterModal] Workbook name:', workbookName);
+          setModelName(workbookName.replace(/\.xlsx?$/i, ''));
         }
-      } catch (e) {
-        // Not available in Excel (only Outlook)
-        console.log('[RegisterModal.jsx] Email not available from context (expected in Excel)');
+      } catch (loadError) {
+        // Model not registered yet, pre-fill model name from workbook name
+        const workbookName = await getWorkbookName();
+        console.log('[RegisterModal] Workbook name:', workbookName);
+        setModelName(workbookName.replace(/\.xlsx?$/i, ''));
       }
 
-      console.log('[RegisterModal.jsx] Initialization complete');
+      console.log('[RegisterModal] Ready');
     } catch (error) {
-      console.error('[RegisterModal.jsx] Failed to initialize modal:', error);
-      setError(`Failed to initialize registration form: ${error.message}`);
+      console.error('[RegisterModal] Initialization failed:', error);
+      setError(`Failed to initialize: ${error.message}`);
     }
+  }
+
+  function addTrackedRange() {
+    setTrackedRanges([...trackedRanges, { name: '', range: '' }]);
+  }
+
+  function updateTrackedRange(index, field, value) {
+    const updated = [...trackedRanges];
+    updated[index][field] = value;
+    setTrackedRanges(updated);
+  }
+
+  function deleteTrackedRange(index) {
+    const updated = trackedRanges.filter((_, i) => i !== index);
+    setTrackedRanges(updated);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
 
-    console.log('[RegisterModal.jsx] Form submitted');
+    if (!modelName.trim()) {
+      setError('Model name is required');
+      return;
+    }
 
-    if (!modelName || !owner) {
-      const errorMsg = 'Model name and owner are required';
-      console.warn('[RegisterModal.jsx]', errorMsg);
-      setError(errorMsg);
+    // Validate tracked ranges
+    const validRanges = trackedRanges.filter(r => r.name.trim() && r.range.trim());
+    if (validRanges.length !== trackedRanges.length) {
+      setError('Please fill in all tracked range fields or remove empty ones');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      console.log('[RegisterModal.jsx] Registering model...');
+      console.log('[RegisterModal] Registering model...');
 
-      // Register with Domino using architecture-compliant API
-      // PUT /wb/upsert-model - creates new model with version 1
+      // Register model with tracked ranges
       const config = await upsertModel({
         model_name: modelName,
-        tracked_ranges: [], // Start with empty tracked ranges
-        model_id: modelId // Provide the generated model_id
+        tracked_ranges: validRanges,
+        model_id: modelId
       });
-      console.log('[RegisterModal.jsx] Model registered:', config);
+      console.log('[RegisterModal] Model registered:', config);
 
       // Save model name in document properties
-      console.log('[RegisterModal.jsx] Saving model name in document...');
       await setModelName(modelName);
 
       // Send success message to parent (commands.js)
-      console.log('[RegisterModal.jsx] Sending success message to parent...');
+      console.log('[RegisterModal] Notifying parent...');
       Office.context.ui.messageParent(JSON.stringify({
         action: 'registered',
         config
       }));
 
     } catch (error) {
-      console.error('[RegisterModal.jsx] Registration failed:', error);
+      console.error('[RegisterModal] Registration failed:', error);
       setError(error.message || 'Failed to register model. Check console for details.');
       setIsSubmitting(false);
     }
@@ -115,13 +133,12 @@ function RegisterModal() {
   return (
     <FluentProvider theme={webLightTheme}>
       <DebugPanel />
-      <div style={{ padding: '20px', maxWidth: '500px', margin: '0 auto', paddingBottom: '320px' }}>
+      <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', paddingBottom: '100px' }}>
 
-        <Title3 style={{ marginBottom: '20px' }}>Register Model with Domino</Title3>
+        <Title3 style={{ marginBottom: '20px' }}>Register Model</Title3>
 
         <Body1 style={{ marginBottom: '20px', color: '#666' }}>
-          Register this Excel model to enable governance tracking and monitoring.
-          All changes to marked cells will be automatically sent to Domino.
+          Register this workbook as a tracked model. Define which cell ranges to monitor for changes.
         </Body1>
 
         <form onSubmit={handleSubmit}>
@@ -129,13 +146,18 @@ function RegisterModal() {
           {/* Model ID (read-only) */}
           <Field
             label="Model ID"
-            hint="Unique identifier (auto-generated)"
+            hint="Unique identifier (auto-generated, read-only)"
             style={{ marginBottom: '16px' }}
           >
             <Input
               value={modelId}
               readOnly
-              style={{ backgroundColor: '#f5f5f5', fontFamily: 'monospace', fontSize: '12px' }}
+              style={{
+                backgroundColor: '#f5f5f5',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                color: '#666'
+              }}
             />
           </Field>
 
@@ -144,7 +166,7 @@ function RegisterModal() {
             label="Model Name"
             required
             hint="A descriptive name for this model"
-            style={{ marginBottom: '16px' }}
+            style={{ marginBottom: '24px' }}
           >
             <Input
               value={modelName}
@@ -154,35 +176,77 @@ function RegisterModal() {
             />
           </Field>
 
-          {/* Owner */}
-          <Field
-            label="Owner"
-            required
-            hint="Primary contact for this model"
-            style={{ marginBottom: '16px' }}
-          >
-            <Input
-              type="email"
-              value={owner}
-              onChange={(e) => setOwner(e.target.value)}
-              placeholder="your.email@company.com"
-              required
-            />
-          </Field>
+          {/* Tracked Ranges */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <Body1 style={{ fontWeight: 600 }}>Tracked Ranges</Body1>
+              <Button
+                appearance="subtle"
+                icon={<Add24Regular />}
+                onClick={addTrackedRange}
+                disabled={isSubmitting}
+              >
+                Add Range
+              </Button>
+            </div>
 
-          {/* Description */}
-          <Field
-            label="Description"
-            hint="Optional description of this model's purpose"
-            style={{ marginBottom: '24px' }}
-          >
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Brief description of what this model does..."
-              rows={3}
-            />
-          </Field>
+            <Body1 style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>
+              Define cell ranges to monitor. Changes to these ranges will be tracked.
+            </Body1>
+
+            {trackedRanges.length === 0 && (
+              <Card style={{ padding: '20px', textAlign: 'center', backgroundColor: '#f9f9f9' }}>
+                <Body1 style={{ color: '#999' }}>
+                  No tracked ranges yet. Click "Add Range" to start monitoring cells.
+                </Body1>
+              </Card>
+            )}
+
+            {trackedRanges.map((range, index) => (
+              <Card key={index} style={{ padding: '12px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <Field
+                      label="Name"
+                      size="small"
+                      style={{ marginBottom: '8px' }}
+                    >
+                      <Input
+                        value={range.name}
+                        onChange={(e) => updateTrackedRange(index, 'name', e.target.value)}
+                        placeholder="e.g., Revenue, Assumptions"
+                        size="small"
+                        disabled={isSubmitting}
+                      />
+                    </Field>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Field
+                      label="Range"
+                      size="small"
+                      style={{ marginBottom: '8px' }}
+                    >
+                      <Input
+                        value={range.range}
+                        onChange={(e) => updateTrackedRange(index, 'range', e.target.value)}
+                        placeholder="e.g., Sheet1!A1:D10"
+                        size="small"
+                        disabled={isSubmitting}
+                      />
+                    </Field>
+                  </div>
+                  <Button
+                    appearance="subtle"
+                    icon={<Delete24Regular />}
+                    onClick={() => deleteTrackedRange(index)}
+                    disabled={isSubmitting}
+                    style={{ marginTop: '20px' }}
+                    title="Remove this range"
+                  />
+                </div>
+              </Card>
+            ))}
+          </div>
 
           {/* Error message */}
           {error && (
@@ -209,15 +273,15 @@ function RegisterModal() {
             <Button
               type="submit"
               appearance="primary"
-              disabled={isSubmitting || !modelName || !owner}
+              disabled={isSubmitting || !modelName.trim()}
             >
               {isSubmitting ? (
                 <>
                   <Spinner size="tiny" style={{ marginRight: '8px' }} />
-                  Registering...
+                  Saving...
                 </>
               ) : (
-                'Register Model'
+                'Save & Register'
               )}
             </Button>
           </div>
@@ -232,11 +296,10 @@ function RegisterModal() {
           borderRadius: '4px'
         }}>
           <Body1 style={{ fontSize: '12px', color: '#666' }}>
-            <strong>What happens after registration?</strong><br />
-            • Model is registered in Domino<br />
-            • Background monitoring starts automatically<br />
-            • Use ribbon buttons to mark cells as inputs/outputs<br />
-            • All changes are streamed to Domino in real-time
+            <strong>After registration:</strong><br />
+            • Model is saved with a unique ID<br />
+            • Changes to tracked ranges are automatically logged<br />
+            • You can update tracked ranges later by re-opening this dialog
           </Body1>
         </div>
 
