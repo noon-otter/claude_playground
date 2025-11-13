@@ -1,27 +1,37 @@
 /*
- * commands.js - ALWAYS RUNNING BACKGROUND SCRIPT
- * This runs independently of the taskpane being open
- * Handles all event monitoring and streaming to Domino
+ * commands-v2.js - Architecture-Compliant Background Script
+ * Implements the exact event flow from DEPLOYMENT.md
+ *
+ * Event Flows:
+ * 1. On File Load → GET /wb/load-model (restore tracked ranges)
+ * 2. Register Model → PUT /wb/upsert-model (create with version=1)
+ * 3. Update Model → PUT /wb/upsert-model (increment version)
+ * 4. Tracked Range Change → POST /wb/create-model-trace
  */
 
 // Global state
 let monitoringActive = false;
-let modelConfig = null;
-let eventQueue = [];
+let modelConfig = null;  // WorkbookModel: {model_name, tracked_ranges[], model_id, version}
+let traceQueue = [];
 let isOnline = true;
+let currentUsername = 'unknown';
 
 // Domino API endpoint - UPDATE THIS
-const DOMINO_API_BASE = 'https://your-domino.com/api';
+const DOMINO_API_BASE = 'http://localhost:5000';
 
 /**
  * Initialize on Office ready
  */
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
-    console.log('🟢 Domino Governance Add-in loaded');
+    console.log('🟢 Domino Governance Add-in loaded (Architecture-Compliant v2)');
     initializeMonitoring();
   }
 });
+
+// =====================================================
+// EVENT FLOW 1: On File Load (Workbook Load Event)
+// =====================================================
 
 /**
  * Main initialization - checks if model is registered and starts monitoring
@@ -35,19 +45,18 @@ async function initializeMonitoring() {
       const modelId = await getOrCreateModelId(workbook, context);
       console.log(`📋 Model ID: ${modelId}`);
 
-      // Check if this model is registered in Domino
-      const registered = await checkModelRegistration(modelId);
+      // Get current username
+      currentUsername = getUserEmail();
+      console.log(`👤 Username: ${currentUsername}`);
+
+      // EVENT: Workbook Load
+      // Call: GET /wb/load-model
+      const registered = await loadModelFromBackend(modelId);
 
       if (registered) {
         modelConfig = registered;
         await startLiveMonitoring(workbook, context, modelId);
-        console.log(`✅ Monitoring active for "${registered.name}"`);
-
-        // Send "opened" event
-        streamToDomino('model_opened', {
-          modelId,
-          timestamp: new Date().toISOString()
-        });
+        console.log(`✅ Monitoring active for "${registered.model_name}" v${registered.version}`);
       } else {
         console.log(`ℹ️ Model not registered. Use "Register Model" button to enable monitoring.`);
       }
@@ -58,6 +67,367 @@ async function initializeMonitoring() {
     console.error('Failed to initialize monitoring:', error);
   }
 }
+
+/**
+ * GET /wb/load-model
+ * Load model metadata by model_id
+ */
+async function loadModelFromBackend(modelId) {
+  try {
+    const response = await fetch(
+      `${DOMINO_API_BASE}/wb/load-model?model_id=${encodeURIComponent(modelId)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (response.ok) {
+      const model = await response.json();
+      console.log('[loadModelFromBackend] Model loaded:', model);
+      return model;
+    }
+
+    if (response.status === 404) {
+      console.log('[loadModelFromBackend] Model not found (not registered yet)');
+      return null;
+    }
+
+    console.error('[loadModelFromBackend] Failed:', response.statusText);
+    return null;
+  } catch (error) {
+    console.error('[loadModelFromBackend] Error:', error);
+    return null;
+  }
+}
+
+// =====================================================
+// EVENT FLOW 2: User-Driven: Register Model
+// =====================================================
+
+/**
+ * Ribbon command: Show registration modal
+ */
+async function showRegisterModal() {
+  try {
+    const modelId = await getModelIdForModal();
+
+    Office.context.ui.displayDialogAsync(
+      `https://localhost:3000/register.html?modelId=${modelId}`,
+      { height: 60, width: 40, displayInIframe: true },
+      (result) => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          const dialog = result.value;
+
+          // Handle messages from modal
+          dialog.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
+            const message = JSON.parse(arg.message);
+
+            if (message.action === 'registered') {
+              // Reload monitoring with new config
+              modelConfig = message.config;
+              console.log('✅ Model registered successfully:', modelConfig);
+
+              // Restart monitoring
+              initializeMonitoring();
+            }
+
+            dialog.close();
+          });
+
+          // Handle dialog closed
+          dialog.addEventHandler(Office.EventType.DialogEventReceived, (arg) => {
+            console.log('Dialog closed:', arg.error);
+          });
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Failed to show registration modal:', error);
+  }
+}
+
+// =====================================================
+// EVENT FLOW 3: User-Driven: Update Model (Add Tracked Range)
+// =====================================================
+
+/**
+ * Ribbon command: Mark selected cells as input
+ */
+async function markAsInput() {
+  await addTrackedRange('input');
+}
+
+/**
+ * Ribbon command: Mark selected cells as output
+ */
+async function markAsOutput() {
+  await addTrackedRange('output');
+}
+
+/**
+ * Ribbon command: Add tracked range (with name prompt)
+ */
+async function addTrackedRange(rangeType = null) {
+  try {
+    await Excel.run(async (context) => {
+      // Get selected range
+      const range = context.workbook.getSelectedRange();
+      range.load('address');
+      await context.sync();
+
+      // Prompt for range name
+      const defaultName = rangeType ? `${rangeType}_${range.address}` : range.address;
+      const rangeName = prompt(`Enter a name for the tracked range (${range.address}):`, defaultName);
+
+      if (!rangeName) {
+        console.log('User cancelled range naming');
+        return;
+      }
+
+      // EVENT: Update Model
+      // Call: PUT /wb/upsert-model (with model_id + version)
+      await updateModelAddRange(rangeName, range.address);
+
+      // Visual feedback - different colors for input/output
+      if (rangeType === 'input') {
+        range.format.fill.color = '#E8F5E9'; // Light green for inputs
+      } else if (rangeType === 'output') {
+        range.format.fill.color = '#FFF3E0'; // Light orange for outputs
+      } else {
+        range.format.fill.color = '#E3F2FD'; // Light blue for general
+      }
+      await context.sync();
+
+      console.log(`✅ Added tracked range: ${rangeName} (${range.address})`);
+    });
+  } catch (error) {
+    console.error('Failed to add tracked range:', error);
+  }
+}
+
+/**
+ * PUT /wb/upsert-model
+ * Add a new tracked range to the model
+ */
+async function updateModelAddRange(rangeName, rangeAddress) {
+  if (!modelConfig) {
+    alert('Model is not registered. Please register the model first.');
+    return;
+  }
+
+  try {
+    // Add new tracked range
+    const newTrackedRange = {
+      name: rangeName,
+      range: rangeAddress
+    };
+
+    const updatedRanges = [...modelConfig.tracked_ranges, newTrackedRange];
+
+    const response = await fetch(`${DOMINO_API_BASE}/wb/upsert-model`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model_name: modelConfig.model_name,
+        tracked_ranges: updatedRanges,
+        model_id: modelConfig.model_id,
+        version: modelConfig.version
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Update failed: ${response.statusText}`);
+    }
+
+    const updatedModel = await response.json();
+    console.log('[updateModelAddRange] Model updated:', updatedModel);
+
+    // Update local config
+    modelConfig = updatedModel;
+
+    return updatedModel;
+  } catch (error) {
+    console.error('[updateModelAddRange] Error:', error);
+    throw error;
+  }
+}
+
+// =====================================================
+// EVENT FLOW 4: Event-Driven: On Tracked Range Changes
+// =====================================================
+
+/**
+ * Start live monitoring of all events
+ */
+async function startLiveMonitoring(workbook, context, modelId) {
+  if (monitoringActive) {
+    console.log('⚠️ Monitoring already active');
+    return;
+  }
+
+  // Monitor ALL worksheet changes
+  workbook.worksheets.onChanged.add(async (event) => {
+    await handleCellChange(event, modelId);
+  });
+
+  monitoringActive = true;
+  console.log('🔴 Live monitoring started');
+}
+
+/**
+ * Handle cell change events
+ */
+async function handleCellChange(event, modelId) {
+  try {
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getItem(event.worksheetId);
+      const range = sheet.getRange(event.address);
+
+      range.load(['values', 'address']);
+      await context.sync();
+
+      // Check if this cell is in a tracked range
+      const trackedRange = findTrackedRange(event.address);
+
+      if (trackedRange) {
+        // EVENT: Tracked Range Change
+        // Call: POST /wb/create-model-trace
+        await createTrace({
+          model_id: modelId,
+          timestamp: new Date().toISOString(),
+          tracked_range_name: trackedRange.name,
+          username: currentUsername,
+          value: range.values[0][0]
+        });
+
+        console.log(
+          `📝 Trace: ${trackedRange.name} = ${range.values[0][0]} by ${currentUsername}`
+        );
+      }
+    });
+  } catch (error) {
+    console.error('Error handling cell change:', error);
+  }
+}
+
+/**
+ * Find tracked range that contains the given address
+ */
+function findTrackedRange(address) {
+  if (!modelConfig || !modelConfig.tracked_ranges) {
+    return null;
+  }
+
+  // Simple containment check - can be enhanced for complex ranges
+  return modelConfig.tracked_ranges.find(tr => {
+    return address.includes(tr.range) || tr.range.includes(address);
+  });
+}
+
+/**
+ * POST /wb/create-model-trace
+ * Create a trace log entry
+ */
+async function createTrace(traceData) {
+  try {
+    const response = await fetch(`${DOMINO_API_BASE}/wb/create-model-trace`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(traceData),
+      keepalive: true // Survives page navigation
+    });
+
+    if (response.ok) {
+      isOnline = true;
+      // Flush queue if we have offline traces
+      flushTraceQueue();
+      return true;
+    } else {
+      console.warn(`[createTrace] API returned ${response.status}`);
+      return false;
+    }
+  } catch (error) {
+    // Queue trace if offline
+    console.warn('[createTrace] API unreachable, queuing trace:', error.message);
+    isOnline = false;
+    queueTraceLocally(traceData);
+    return false;
+  }
+}
+
+// =====================================================
+// OFFLINE QUEUE MANAGEMENT
+// =====================================================
+
+/**
+ * Queue trace locally when offline
+ */
+function queueTraceLocally(traceData) {
+  traceQueue.push({
+    ...traceData,
+    queuedAt: new Date().toISOString()
+  });
+
+  // Limit queue size
+  if (traceQueue.length > 100) {
+    traceQueue.shift(); // Remove oldest
+  }
+
+  // Try to flush periodically
+  setTimeout(flushTraceQueue, 30000); // Retry in 30s
+}
+
+/**
+ * Flush queued traces when back online
+ */
+async function flushTraceQueue() {
+  if (traceQueue.length === 0 || !isOnline) {
+    return;
+  }
+
+  console.log(`📤 Flushing ${traceQueue.length} queued traces`);
+
+  const traces = [...traceQueue];
+  traceQueue = [];
+
+  try {
+    const response = await fetch(`${DOMINO_API_BASE}/wb/create-model-trace-batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model_id: modelConfig.model_id,
+        timestamp: new Date().toISOString(),
+        changes: traces.map(t => ({
+          tracked_range_name: t.tracked_range_name,
+          value: t.value
+        })),
+        username: currentUsername
+      })
+    });
+
+    if (!response.ok) {
+      // Re-queue on failure
+      traceQueue = traces.concat(traceQueue);
+    }
+  } catch (error) {
+    // Re-queue on failure
+    traceQueue = traces.concat(traceQueue);
+    isOnline = false;
+  }
+}
+
+// =====================================================
+// UTILITY FUNCTIONS
+// =====================================================
 
 /**
  * Get or create persistent model ID from custom document properties
@@ -100,294 +470,6 @@ function generateModelId() {
 }
 
 /**
- * Check if model is registered in Domino
- */
-async function checkModelRegistration(modelId) {
-  try {
-    const response = await fetch(`${DOMINO_API_BASE}/models/${modelId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (response.ok) {
-      return await response.json();
-    }
-
-    return null;
-  } catch (error) {
-    console.error('Failed to check registration:', error);
-    return null;
-  }
-}
-
-/**
- * Start live monitoring of all events
- */
-async function startLiveMonitoring(workbook, context, modelId) {
-  if (monitoringActive) {
-    console.log('⚠️ Monitoring already active');
-    return;
-  }
-
-  // Monitor ALL worksheet changes
-  workbook.worksheets.onChanged.add(async (event) => {
-    await handleCellChange(event, modelId);
-  });
-
-  // Monitor selection changes (user interactions)
-  workbook.onSelectionChanged.add((event) => {
-    streamToDomino('selection_changed', {
-      modelId,
-      worksheet: event.worksheetId,
-      range: event.address,
-      timestamp: new Date().toISOString()
-    });
-  });
-
-  // Monitor saves
-  workbook.onAutoSaveSettingChanged.add(() => {
-    streamToDomino('model_saved', {
-      modelId,
-      timestamp: new Date().toISOString()
-    });
-  });
-
-  // Monitor worksheet activations
-  workbook.worksheets.onActivated.add((event) => {
-    streamToDomino('worksheet_activated', {
-      modelId,
-      worksheetId: event.worksheetId,
-      timestamp: new Date().toISOString()
-    });
-  });
-
-  monitoringActive = true;
-  console.log('🔴 Live monitoring started');
-}
-
-/**
- * Handle cell change events
- */
-async function handleCellChange(event, modelId) {
-  try {
-    await Excel.run(async (context) => {
-      const sheet = context.workbook.worksheets.getItem(event.worksheetId);
-      const range = sheet.getRange(event.address);
-
-      range.load(['values', 'formulas', 'address']);
-      await context.sync();
-
-      // Check if this cell is in our monitored list
-      const isMonitored = checkIfMonitored(event.address);
-
-      if (isMonitored) {
-        const cellType = getCellType(event.address);
-
-        streamToDomino('cell_changed', {
-          modelId,
-          worksheet: event.worksheetId,
-          cell: event.address,
-          value: range.values[0][0],
-          formula: range.formulas[0][0],
-          type: cellType, // 'input' or 'output'
-          user: getUserEmail(),
-          timestamp: new Date().toISOString()
-        });
-      } else {
-        // Still log unmonitored changes for full audit trail
-        streamToDomino('unmonitored_cell_changed', {
-          modelId,
-          worksheet: event.worksheetId,
-          cell: event.address,
-          timestamp: new Date().toISOString()
-        });
-      }
-    });
-  } catch (error) {
-    console.error('Error handling cell change:', error);
-  }
-}
-
-/**
- * Check if a cell range is in monitored list
- */
-function checkIfMonitored(address) {
-  if (!modelConfig || !modelConfig.monitoredCells) {
-    return false;
-  }
-
-  return modelConfig.monitoredCells.some(cell => {
-    return cellInRange(address, cell.range);
-  });
-}
-
-/**
- * Get cell type (input/output) from monitored list
- */
-function getCellType(address) {
-  if (!modelConfig || !modelConfig.monitoredCells) {
-    return null;
-  }
-
-  const cell = modelConfig.monitoredCells.find(c => cellInRange(address, c.range));
-  return cell ? cell.type : null;
-}
-
-/**
- * Check if address is within a range
- */
-function cellInRange(address, range) {
-  // Simple check - can be enhanced for complex ranges
-  return address.includes(range) || range.includes(address);
-}
-
-/**
- * Get current user email
- */
-function getUserEmail() {
-  try {
-    // Try to get from Office context
-    if (Office.context.mailbox && Office.context.mailbox.userProfile) {
-      return Office.context.mailbox.userProfile.emailAddress;
-    }
-    return 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
-/**
- * Stream event to Domino API
- */
-function streamToDomino(eventType, data) {
-  const payload = {
-    event: eventType,
-    ...data
-  };
-
-  // Non-blocking fire-and-forget
-  fetch(`${DOMINO_API_BASE}/excel-events`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload),
-    keepalive: true // Survives page navigation
-  })
-    .then(response => {
-      if (response.ok) {
-        isOnline = true;
-        // Flush queue if we have offline events
-        flushEventQueue();
-      } else {
-        console.warn(`API returned ${response.status}`);
-      }
-    })
-    .catch(error => {
-      // Queue event if offline
-      console.warn('Domino API unreachable, queuing event:', error.message);
-      isOnline = false;
-      queueEventLocally(eventType, data);
-    });
-}
-
-/**
- * Queue event locally when offline
- */
-function queueEventLocally(eventType, data) {
-  eventQueue.push({
-    event: eventType,
-    ...data,
-    queuedAt: new Date().toISOString()
-  });
-
-  // Limit queue size
-  if (eventQueue.length > 100) {
-    eventQueue.shift(); // Remove oldest
-  }
-
-  // Try to flush periodically
-  setTimeout(flushEventQueue, 30000); // Retry in 30s
-}
-
-/**
- * Flush queued events when back online
- */
-async function flushEventQueue() {
-  if (eventQueue.length === 0 || !isOnline) {
-    return;
-  }
-
-  console.log(`📤 Flushing ${eventQueue.length} queued events`);
-
-  const events = [...eventQueue];
-  eventQueue = [];
-
-  try {
-    const response = await fetch(`${DOMINO_API_BASE}/excel-events/batch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ events })
-    });
-
-    if (!response.ok) {
-      // Re-queue on failure
-      eventQueue = events.concat(eventQueue);
-    }
-  } catch (error) {
-    // Re-queue on failure
-    eventQueue = events.concat(eventQueue);
-    isOnline = false;
-  }
-}
-
-/**
- * Ribbon command: Show registration modal
- */
-async function showRegisterModal() {
-  try {
-    const modelId = await getModelIdForModal();
-
-    Office.context.ui.displayDialogAsync(
-      `https://localhost:3000/register.html?modelId=${modelId}`,
-      { height: 60, width: 40, displayInIframe: true },
-      (result) => {
-        if (result.status === Office.AsyncResultStatus.Succeeded) {
-          const dialog = result.value;
-
-          // Handle messages from modal
-          dialog.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
-            const message = JSON.parse(arg.message);
-
-            if (message.action === 'registered') {
-              // Reload monitoring with new config
-              modelConfig = message.config;
-              console.log('✅ Model registered successfully');
-
-              // Restart monitoring
-              initializeMonitoring();
-            }
-
-            dialog.close();
-          });
-
-          // Handle dialog closed
-          dialog.addEventHandler(Office.EventType.DialogEventReceived, (arg) => {
-            console.log('Dialog closed:', arg.error);
-          });
-        }
-      }
-    );
-  } catch (error) {
-    console.error('Failed to show registration modal:', error);
-  }
-}
-
-/**
  * Get model ID for modal
  */
 async function getModelIdForModal() {
@@ -403,93 +485,28 @@ async function getModelIdForModal() {
 }
 
 /**
- * Ribbon command: Mark selected cells as Input
+ * Get current user email
  */
-async function markAsInput() {
-  await markSelection('input', '#E3F2FD'); // Light blue
-}
-
-/**
- * Ribbon command: Mark selected cells as Output
- */
-async function markAsOutput() {
-  await markSelection('output', '#E8F5E9'); // Light green
-}
-
-/**
- * Mark selected range as input or output
- */
-async function markSelection(type, color) {
+function getUserEmail() {
   try {
-    await Excel.run(async (context) => {
-      const range = context.workbook.getSelectedRange();
-      range.load('address');
-      await context.sync();
+    // Try to get from Office context (not available in Excel, only Outlook)
+    if (Office.context.mailbox && Office.context.mailbox.userProfile) {
+      return Office.context.mailbox.userProfile.emailAddress;
+    }
 
-      // Add to monitored cells
-      await addMonitoredCell(range.address, type);
-
-      // Visual feedback
-      range.format.fill.color = color;
-      await context.sync();
-
-      console.log(`✅ Marked ${range.address} as ${type}`);
-
-      // Notify Domino
-      streamToDomino('cell_marked', {
-        modelId: modelConfig?.id || 'unknown',
-        range: range.address,
-        type,
-        timestamp: new Date().toISOString()
-      });
-    });
-  } catch (error) {
-    console.error(`Failed to mark as ${type}:`, error);
+    // Try to get from document properties or environment
+    return Office.context.document?.displayName || 'unknown';
+  } catch {
+    return 'unknown';
   }
 }
 
-/**
- * Add cell to monitored list
- */
-async function addMonitoredCell(address, type) {
-  // Initialize if needed
-  if (!modelConfig) {
-    modelConfig = { monitoredCells: [] };
-  }
+// =====================================================
+// REGISTER RIBBON COMMAND HANDLERS
+// =====================================================
 
-  if (!modelConfig.monitoredCells) {
-    modelConfig.monitoredCells = [];
-  }
-
-  // Add to local config
-  modelConfig.monitoredCells.push({
-    range: address,
-    type,
-    addedAt: new Date().toISOString()
-  });
-
-  // Persist to Domino
-  try {
-    await fetch(`${DOMINO_API_BASE}/models/${modelConfig.id}/cells`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        range: address,
-        type
-      })
-    });
-  } catch (error) {
-    console.error('Failed to persist monitored cell:', error);
-  }
-}
-
-/**
- * Register ribbon command handlers
- */
 Office.actions.associate("showRegisterModal", showRegisterModal);
 Office.actions.associate("markAsInput", markAsInput);
 Office.actions.associate("markAsOutput", markAsOutput);
 
-console.log('📋 Command handlers registered');
+console.log('📋 Command handlers registered (Architecture-Compliant v2)');

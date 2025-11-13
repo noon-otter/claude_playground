@@ -12,45 +12,55 @@ import {
   Delete24Regular,
   ArrowSync24Regular
 } from '@fluentui/react-icons';
-import { getModelActivity, removeMonitoredCell } from '../utils/domino-api';
+import { getModelTraces, upsertModel } from '../utils/domino-api';
 
 function MonitorView({ modelId, modelConfig }) {
-  const [monitoredCells, setMonitoredCells] = useState([]);
-  const [recentActivity, setRecentActivity] = useState([]);
+  const [trackedRanges, setTrackedRanges] = useState([]);
+  const [recentTraces, setRecentTraces] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    loadMonitoredCells();
-    loadActivity();
+    loadTrackedRanges();
+    loadTraces();
   }, [modelId]);
 
-  function loadMonitoredCells() {
-    if (modelConfig && modelConfig.monitoredCells) {
-      setMonitoredCells(modelConfig.monitoredCells);
+  function loadTrackedRanges() {
+    // Use tracked_ranges from the new architecture
+    if (modelConfig && modelConfig.tracked_ranges) {
+      setTrackedRanges(modelConfig.tracked_ranges);
     }
   }
 
-  async function loadActivity() {
+  async function loadTraces() {
     try {
-      const activity = await getModelActivity(modelId, 20);
-      setRecentActivity(activity);
+      const traces = await getModelTraces(modelId, 20);
+      setRecentTraces(traces);
     } catch (error) {
-      console.error('Failed to load activity:', error);
+      console.error('Failed to load traces:', error);
     }
   }
 
   async function handleRefresh() {
     setIsRefreshing(true);
-    await loadActivity();
+    await loadTraces();
     setTimeout(() => setIsRefreshing(false), 500);
   }
 
-  async function handleRemoveCell(cellRange) {
+  async function handleRemoveRange(rangeName) {
     try {
-      await removeMonitoredCell(modelId, cellRange);
-      setMonitoredCells(prev => prev.filter(c => c.range !== cellRange));
+      // Remove tracked range by updating the model
+      const updatedRanges = trackedRanges.filter(tr => tr.name !== rangeName);
+
+      await upsertModel({
+        model_name: modelConfig.model_name,
+        tracked_ranges: updatedRanges,
+        model_id: modelId,
+        version: modelConfig.version
+      });
+
+      setTrackedRanges(updatedRanges);
     } catch (error) {
-      console.error('Failed to remove cell:', error);
+      console.error('Failed to remove tracked range:', error);
     }
   }
 
@@ -77,36 +87,38 @@ function MonitorView({ modelId, modelConfig }) {
         <div style={{ padding: '12px' }}>
           <div style={{ marginBottom: '8px' }}>
             <Body2 style={{ color: '#666' }}>Name:</Body2>
-            <Body1>{modelConfig?.name || 'Untitled Model'}</Body1>
+            <Body1>{modelConfig?.model_name || 'Untitled Model'}</Body1>
           </div>
           <div style={{ marginBottom: '8px' }}>
-            <Body2 style={{ color: '#666' }}>Owner:</Body2>
-            <Body1>{modelConfig?.owner || 'Unknown'}</Body1>
+            <Body2 style={{ color: '#666' }}>Version:</Body2>
+            <Body1>v{modelConfig?.version || 1}</Body1>
           </div>
           <div>
-            <Body2 style={{ color: '#666' }}>Registered:</Body2>
-            <Body1>{modelConfig?.registeredAt ? new Date(modelConfig.registeredAt).toLocaleDateString() : 'Unknown'}</Body1>
+            <Body2 style={{ color: '#666' }}>Model ID:</Body2>
+            <Body1 style={{ fontSize: '11px', fontFamily: 'monospace' }}>
+              {modelConfig?.model_id || modelId}
+            </Body1>
           </div>
         </div>
       </Card>
 
       <Divider style={{ marginBottom: '20px' }} />
 
-      {/* Monitored Cells */}
+      {/* Tracked Ranges */}
       <Card style={{ marginBottom: '20px' }}>
         <CardHeader
-          header={<Body1 weight="semibold">Monitored Cells</Body1>}
-          description={<Body2>{monitoredCells.length} cells tracked</Body2>}
+          header={<Body1 weight="semibold">Tracked Ranges</Body1>}
+          description={<Body2>{trackedRanges.length} ranges tracked</Body2>}
         />
         <div style={{ padding: '12px' }}>
-          {monitoredCells.length === 0 ? (
+          {trackedRanges.length === 0 ? (
             <Body1 style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
-              No cells monitored yet. Use "Mark Input" or "Mark Output" buttons
-              in the ribbon to start tracking cells.
+              No ranges tracked yet. Use "Add Tracked Range" button
+              in the ribbon to start tracking cell ranges.
             </Body1>
           ) : (
             <div>
-              {monitoredCells.map((cell, index) => (
+              {trackedRanges.map((trackedRange, index) => (
                 <div
                   key={index}
                   style={{
@@ -120,25 +132,17 @@ function MonitorView({ modelId, modelConfig }) {
                   }}
                 >
                   <div style={{ flex: 1 }}>
-                    <Body1 weight="semibold">{cell.range}</Body1>
-                    <Body2 style={{ color: '#666' }}>
-                      Added {formatTimestamp(cell.addedAt)}
+                    <Body1 weight="semibold">{trackedRange.name}</Body1>
+                    <Body2 style={{ color: '#666', fontFamily: 'monospace', fontSize: '11px' }}>
+                      {trackedRange.range}
                     </Body2>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Badge
-                      appearance="filled"
-                      color={cell.type === 'input' ? 'informative' : 'success'}
-                    >
-                      {cell.type}
-                    </Badge>
-                    <Button
-                      appearance="subtle"
-                      icon={<Delete24Regular />}
-                      size="small"
-                      onClick={() => handleRemoveCell(cell.range)}
-                    />
-                  </div>
+                  <Button
+                    appearance="subtle"
+                    icon={<Delete24Regular />}
+                    size="small"
+                    onClick={() => handleRemoveRange(trackedRange.name)}
+                  />
                 </div>
               ))}
             </div>
@@ -148,10 +152,10 @@ function MonitorView({ modelId, modelConfig }) {
 
       <Divider style={{ marginBottom: '20px' }} />
 
-      {/* Recent Activity */}
+      {/* Recent Traces */}
       <Card>
         <CardHeader
-          header={<Body1 weight="semibold">Recent Activity</Body1>}
+          header={<Body1 weight="semibold">Recent Traces</Body1>}
           action={
             <Button
               appearance="subtle"
@@ -165,13 +169,13 @@ function MonitorView({ modelId, modelConfig }) {
           }
         />
         <div style={{ padding: '12px' }}>
-          {recentActivity.length === 0 ? (
+          {recentTraces.length === 0 ? (
             <Body1 style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
-              No recent activity
+              No traces recorded yet
             </Body1>
           ) : (
             <div>
-              {recentActivity.slice(0, 10).map((event, index) => (
+              {recentTraces.slice(0, 10).map((trace, index) => (
                 <div
                   key={index}
                   style={{
@@ -183,17 +187,15 @@ function MonitorView({ modelId, modelConfig }) {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <Body1 weight="semibold">{formatEventType(event.event)}</Body1>
-                    <Body2 style={{ color: '#666' }}>{formatTimestamp(event.timestamp)}</Body2>
+                    <Body1 weight="semibold">{trace.tracked_range_name}</Body1>
+                    <Body2 style={{ color: '#666' }}>{formatTimestamp(trace.timestamp)}</Body2>
                   </div>
-                  {event.cell && (
-                    <Body2 style={{ color: '#666' }}>
-                      Cell: {event.cell} {event.value !== undefined && `→ ${event.value}`}
-                    </Body2>
-                  )}
-                  {event.user && (
+                  <Body2 style={{ color: '#666' }}>
+                    Value: {JSON.stringify(trace.value)}
+                  </Body2>
+                  {trace.username && (
                     <Body2 style={{ color: '#999', fontSize: '11px' }}>
-                      By: {event.user}
+                      By: {trace.username}
                     </Body2>
                   )}
                 </div>
@@ -205,20 +207,6 @@ function MonitorView({ modelId, modelConfig }) {
 
     </div>
   );
-}
-
-function formatEventType(eventType) {
-  const eventNames = {
-    'model_opened': '📂 Model Opened',
-    'model_saved': '💾 Model Saved',
-    'cell_changed': '✏️ Cell Changed',
-    'cell_marked': '🏷️ Cell Marked',
-    'selection_changed': '👆 Selection Changed',
-    'worksheet_activated': '📄 Worksheet Activated',
-    'unmonitored_cell_changed': '📝 Unmonitored Change'
-  };
-
-  return eventNames[eventType] || eventType;
 }
 
 export default MonitorView;

@@ -10,8 +10,9 @@ import {
   Field,
   Spinner
 } from '@fluentui/react-components';
-import { registerModel } from '../utils/domino-api';
+import { upsertModel } from '../utils/domino-api';
 import { setModelName, getWorkbookName } from '../utils/model-id';
+import DebugPanel from '../components/DebugPanel';
 
 function RegisterModal() {
   const [modelId, setModelId] = useState('');
@@ -22,33 +23,41 @@ function RegisterModal() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    console.log('[RegisterModal.jsx] Component mounted, initializing...');
     initializeModal();
   }, []);
 
   async function initializeModal() {
+    console.log('[RegisterModal.jsx] initializeModal() started');
     try {
       // Get model ID from URL params
       const params = new URLSearchParams(window.location.search);
       const id = params.get('modelId');
+      console.log('[RegisterModal.jsx] Model ID from URL:', id);
       setModelId(id);
 
       // Pre-fill model name from workbook name
+      console.log('[RegisterModal.jsx] Getting workbook name...');
       const workbookName = await getWorkbookName();
+      console.log('[RegisterModal.jsx] Workbook name:', workbookName);
       setModelName(workbookName.replace('.xlsx', ''));
 
       // Try to get user email from Office context
       try {
         const email = Office.context.mailbox?.userProfile?.emailAddress;
         if (email) {
+          console.log('[RegisterModal.jsx] Got email from context:', email);
           setOwner(email);
         }
       } catch (e) {
         // Not available in Excel (only Outlook)
-        console.log('Email not available from context');
+        console.log('[RegisterModal.jsx] Email not available from context (expected in Excel)');
       }
+
+      console.log('[RegisterModal.jsx] Initialization complete');
     } catch (error) {
-      console.error('Failed to initialize modal:', error);
-      setError('Failed to initialize registration form');
+      console.error('[RegisterModal.jsx] Failed to initialize modal:', error);
+      setError(`Failed to initialize registration form: ${error.message}`);
     }
   }
 
@@ -56,34 +65,43 @@ function RegisterModal() {
     e.preventDefault();
     setError(null);
 
+    console.log('[RegisterModal.jsx] Form submitted');
+
     if (!modelName || !owner) {
-      setError('Model name and owner are required');
+      const errorMsg = 'Model name and owner are required';
+      console.warn('[RegisterModal.jsx]', errorMsg);
+      setError(errorMsg);
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // Register with Domino
-      const config = await registerModel({
-        modelId,
-        name: modelName,
-        owner,
-        description
+      console.log('[RegisterModal.jsx] Registering model...');
+
+      // Register with Domino using architecture-compliant API
+      // PUT /wb/upsert-model - creates new model with version 1
+      const config = await upsertModel({
+        model_name: modelName,
+        tracked_ranges: [], // Start with empty tracked ranges
+        model_id: modelId // Provide the generated model_id
       });
+      console.log('[RegisterModal.jsx] Model registered:', config);
 
       // Save model name in document properties
+      console.log('[RegisterModal.jsx] Saving model name in document...');
       await setModelName(modelName);
 
       // Send success message to parent (commands.js)
+      console.log('[RegisterModal.jsx] Sending success message to parent...');
       Office.context.ui.messageParent(JSON.stringify({
         action: 'registered',
         config
       }));
 
     } catch (error) {
-      console.error('Registration failed:', error);
-      setError(error.message || 'Failed to register model');
+      console.error('[RegisterModal.jsx] Registration failed:', error);
+      setError(error.message || 'Failed to register model. Check console for details.');
       setIsSubmitting(false);
     }
   }
@@ -96,7 +114,8 @@ function RegisterModal() {
 
   return (
     <FluentProvider theme={webLightTheme}>
-      <div style={{ padding: '20px', maxWidth: '500px', margin: '0 auto' }}>
+      <DebugPanel />
+      <div style={{ padding: '20px', maxWidth: '500px', margin: '0 auto', paddingBottom: '320px' }}>
 
         <Title3 style={{ marginBottom: '20px' }}>Register Model with Domino</Title3>
 

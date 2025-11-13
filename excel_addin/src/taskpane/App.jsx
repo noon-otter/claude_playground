@@ -16,8 +16,9 @@ import {
   Info24Regular
 } from '@fluentui/react-icons';
 import MonitorView from './MonitorView';
-import { getModelById } from '../utils/domino-api';
+import { loadModel } from '../utils/domino-api';
 import { getOrCreateModelId, getWorkbookName } from '../utils/model-id';
+import DebugPanel from '../components/DebugPanel';
 
 function App() {
   const [modelId, setModelId] = useState(null);
@@ -25,31 +26,49 @@ function App() {
   const [isRegistered, setIsRegistered] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [workbookName, setWorkbookName] = useState('');
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    console.log('[App.jsx] Component mounted, initializing...');
     initializeApp();
   }, []);
 
   async function initializeApp() {
+    console.log('[App.jsx] initializeApp() started');
     try {
       // Get model ID
+      console.log('[App.jsx] Getting model ID...');
       const id = await getOrCreateModelId();
+      console.log('[App.jsx] Model ID:', id);
       setModelId(id);
 
       // Get workbook name
+      console.log('[App.jsx] Getting workbook name...');
       const name = await getWorkbookName();
+      console.log('[App.jsx] Workbook name:', name);
       setWorkbookName(name);
 
-      // Check if registered
-      const config = await getModelById(id);
-      if (config) {
-        setModelConfig(config);
-        setIsRegistered(true);
+      // Check if registered using architecture-compliant API
+      console.log('[App.jsx] Checking if model is registered...');
+      try {
+        const config = await loadModel(id);
+        if (config) {
+          console.log('[App.jsx] Model is registered:', config);
+          setModelConfig(config);
+          setIsRegistered(true);
+        } else {
+          console.log('[App.jsx] Model is not registered');
+        }
+      } catch (apiError) {
+        // API errors are not critical - the add-in can still work
+        console.warn('[App.jsx] API call failed (this is OK in dev mode):', apiError);
       }
 
+      console.log('[App.jsx] Initialization complete');
       setIsLoading(false);
     } catch (error) {
-      console.error('Failed to initialize app:', error);
+      console.error('[App.jsx] Failed to initialize app:', error);
+      setError(error);
       setIsLoading(false);
     }
   }
@@ -74,11 +93,55 @@ function App() {
     );
   }
 
+  if (error) {
+    return (
+      <FluentProvider theme={webLightTheme}>
+        <div style={{ padding: '20px' }}>
+          <Card style={{ backgroundColor: '#FEF0F0', border: '1px solid #D13438' }}>
+            <div style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
+                <ErrorCircle24Regular style={{ marginRight: '8px', color: '#D13438' }} />
+                <Body1 weight="semibold">Initialization Error</Body1>
+              </div>
+              <Body1 style={{ marginBottom: '12px', fontSize: '14px' }}>
+                {error.message}
+              </Body1>
+              <details style={{ fontSize: '12px', color: '#666' }}>
+                <summary style={{ cursor: 'pointer', marginBottom: '8px' }}>
+                  Show stack trace
+                </summary>
+                <pre style={{
+                  backgroundColor: '#f8f9fa',
+                  padding: '10px',
+                  borderRadius: '4px',
+                  overflow: 'auto',
+                  fontSize: '11px'
+                }}>
+                  {error.stack}
+                </pre>
+              </details>
+              <Button
+                appearance="primary"
+                onClick={() => window.location.reload()}
+                style={{ marginTop: '12px' }}
+              >
+                Reload Add-in
+              </Button>
+            </div>
+          </Card>
+        </div>
+      </FluentProvider>
+    );
+  }
+
   if (isLoading) {
     return (
       <FluentProvider theme={webLightTheme}>
         <div style={{ padding: '20px' }}>
           <Title3>Loading...</Title3>
+          <Body1 style={{ marginTop: '10px', color: '#666' }}>
+            Initializing Excel add-in...
+          </Body1>
         </div>
       </FluentProvider>
     );
@@ -86,7 +149,8 @@ function App() {
 
   return (
     <FluentProvider theme={webLightTheme}>
-      <div style={{ padding: '20px', minHeight: '100vh' }}>
+      <DebugPanel />
+      <div style={{ padding: '20px', minHeight: '100vh', paddingBottom: '320px' }}>
 
         {/* Header */}
         <div style={{ marginBottom: '20px' }}>

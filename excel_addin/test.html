@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Page</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .status {
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 4px;
+      background-color: white;
+      border-left: 4px solid #0078d4;
+    }
+    .success { border-left-color: #107c10; }
+    .error { border-left-color: #d13438; }
+    pre {
+      background-color: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      overflow: auto;
+      font-size: 12px;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #0078d4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover {
+      background-color: #106ebe;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Excel Add-in Debug Test Page</h1>
+  <p>This page helps you diagnose issues with the Excel add-in.</p>
+
+  <div id="status" class="status">
+    <strong>Status:</strong> Initializing...
+  </div>
+
+  <div id="logs" style="margin-top: 20px;">
+    <h3>Console Logs:</h3>
+    <pre id="log-output"></pre>
+  </div>
+
+  <div style="margin-top: 20px;">
+    <button onclick="testOfficeJS()">Test Office.js</button>
+    <button onclick="testVite()">Test Vite HMR</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+  </div>
+
+  <script>
+    let logs = [];
+
+    function addLog(message, type = 'info') {
+      const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
+      const logEntry = `[${timestamp}] ${message}`;
+      logs.push(logEntry);
+      console.log(logEntry);
+      document.getElementById('log-output').textContent = logs.join('\n');
+    }
+
+    function clearLogs() {
+      logs = [];
+      document.getElementById('log-output').textContent = '';
+    }
+
+    function updateStatus(message, success = true) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.innerHTML = `<strong>Status:</strong> ${message}`;
+      statusDiv.className = success ? 'status success' : 'status error';
+    }
+
+    // Intercept console.log
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      addLog('LOG: ' + args.join(' '));
+    };
+
+    console.error = function(...args) {
+      originalError.apply(console, args);
+      addLog('ERROR: ' + args.join(' '));
+    };
+
+    console.warn = function(...args) {
+      originalWarn.apply(console, args);
+      addLog('WARN: ' + args.join(' '));
+    };
+
+    // Test page initialization
+    addLog('Test page loaded');
+    addLog('window.Office available: ' + (typeof Office !== 'undefined'));
+    addLog('window.Excel available: ' + (typeof Excel !== 'undefined'));
+
+    function testOfficeJS() {
+      addLog('Testing Office.js...');
+      if (typeof Office === 'undefined') {
+        addLog('ERROR: Office.js not loaded!');
+        return;
+      }
+      addLog('Office.js is loaded');
+      addLog('Office.context available: ' + (typeof Office.context !== 'undefined'));
+    }
+
+    function testVite() {
+      addLog('Testing Vite connection...');
+      addLog('import.meta.hot available: ' + (typeof import !== 'undefined'));
+      addLog('Current URL: ' + window.location.href);
+    }
+
+    // Wait for everything to load
+    window.addEventListener('load', () => {
+      addLog('Window loaded event fired');
+      updateStatus('Page fully loaded', true);
+    });
+
+    addLog('Test page script executed');
+  </script>
+
+  <!-- Try to load Office.js -->
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script>
+    setTimeout(() => {
+      if (typeof Office !== 'undefined') {
+        addLog('Office object is available');
+        Office.onReady((info) => {
+          addLog('Office.onReady fired!');
+          addLog('Host: ' + info.host);
+          addLog('Platform: ' + info.platform);
+          updateStatus('Office.js loaded (outside Excel context)', true);
+        });
+      } else {
+        addLog('ERROR: Office is not defined after loading office.js');
+        updateStatus('Office.js failed to load', false);
+      }
+    }, 500);
+  </script>
+</body>
+</html>

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite --port 3000 --host localhost"
+    "prestart": "bash -c 'lsof -ti:3000 | xargs kill -9 2>/dev/null || true' && bash install_addin_locally.sh",
+    "start": "vite --port 3000 --host localhost",
+    "backend": "bash start-backend.sh"
   },
   "dependencies": {
     "@fluentui/react-components": "^9.47.0",

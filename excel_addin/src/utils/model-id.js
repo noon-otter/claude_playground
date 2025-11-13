@@ -11,12 +11,19 @@ const MODEL_NAME_PROPERTY = 'DominoModelName';
  * Stored in Excel's custom document properties - survives Save As, renames, etc.
  */
 export async function getOrCreateModelId() {
-  return await Excel.run(async (context) => {
-    const workbook = context.workbook;
-    const properties = workbook.properties.custom;
+  try {
+    // Check if Excel APIs are available
+    if (typeof Excel === 'undefined' || !Excel.run) {
+      console.warn('[model-id] Excel APIs not available, using fallback');
+      return generateModelId(); // Fallback to generating new ID
+    }
 
-    properties.load('items');
-    await context.sync();
+    return await Excel.run(async (context) => {
+      const workbook = context.workbook;
+      const properties = workbook.properties.custom;
+
+      properties.load('items');
+      await context.sync();
 
     // Check if model ID exists
     let modelIdProp = null;
@@ -33,13 +40,24 @@ export async function getOrCreateModelId() {
       return modelIdProp.value;
     }
 
-    // Generate new persistent ID
-    const modelId = generateModelId();
-    properties.add(MODEL_ID_PROPERTY, modelId);
-    await context.sync();
+      // Generate new persistent ID
+      const modelId = generateModelId();
+      properties.add(MODEL_ID_PROPERTY, modelId);
+      await context.sync();
 
-    return modelId;
-  });
+      return modelId;
+    });
+  } catch (error) {
+    console.error('[model-id] Error accessing Excel properties:', error);
+    console.log('[model-id] Falling back to session-based ID');
+    // Fallback: use localStorage or generate temporary ID
+    let fallbackId = localStorage.getItem('DominoModelId_Fallback');
+    if (!fallbackId) {
+      fallbackId = generateModelId();
+      localStorage.setItem('DominoModelId_Fallback', fallbackId);
+    }
+    return fallbackId;
+  }
 }
 
 /**
@@ -149,6 +167,10 @@ export async function getModelName() {
  */
 export async function getWorkbookName() {
   try {
+    if (typeof Excel === 'undefined' || !Excel.run) {
+      return 'Excel Workbook';
+    }
+
     return await Excel.run(async (context) => {
       const workbook = context.workbook;
       workbook.load('name');
@@ -157,7 +179,7 @@ export async function getWorkbookName() {
     });
   } catch (error) {
     console.error('Failed to get workbook name:', error);
-    return 'Unknown';
+    return 'Excel Workbook';
   }
 }
 

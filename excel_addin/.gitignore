@@ -1,28 +1,18 @@
-# Dependencies
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Node
 node_modules/
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
+npm-debug.log*
 
-# Build output
-dist/
-build/
-
-# Development
-.vite/
+# Environment
 .env
 .env.local
-.env.*.local
-
-# SSL certificates
-certs/
-*.pem
-*.key
-*.crt
-
-# Logs
-*.log
-logs/
 
 # OS
 .DS_Store
@@ -33,8 +23,8 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-*~
 
-# Office
-~$*.xlsx
-~$*.xlsm
+# Build
+dist/
+build/
+*.egg-info/

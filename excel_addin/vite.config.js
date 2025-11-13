@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
+import { homedir } from 'os';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -20,12 +21,8 @@ export default defineConfig({
   server: {
     port: 3000,
     https: {
-      key: fs.existsSync('./certs/localhost.key')
-        ? fs.readFileSync('./certs/localhost.key')
-        : undefined,
-      cert: fs.existsSync('./certs/localhost.crt')
-        ? fs.readFileSync('./certs/localhost.crt')
-        : undefined
+      key: fs.readFileSync(path.join(homedir(), '.office-addin-dev-certs', 'localhost.key')),
+      cert: fs.readFileSync(path.join(homedir(), '.office-addin-dev-certs', 'localhost.crt'))
     },
     cors: true
   },
