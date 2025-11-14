@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Excel Model Tracker</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            margin: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #0078d4;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            margin-top: 0;
+            font-size: 18px;
+            color: #323130;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #323130;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d1d1d1;
+            border-radius: 2px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        textarea {
+            min-height: 80px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+        button {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 2px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #106ebe;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .info {
+            background-color: #f0f6ff;
+            padding: 10px;
+            border-left: 3px solid #0078d4;
+            margin-bottom: 15px;
+        }
+        .info p {
+            margin: 5px 0;
+            font-size: 13px;
+        }
+        .tracked-range {
+            background-color: #f9f9f9;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .tracked-range-info {
+            flex-grow: 1;
+        }
+        .tracked-range-name {
+            font-weight: 600;
+            color: #0078d4;
+        }
+        .tracked-range-address {
+            font-size: 12px;
+            color: #666;
+            font-family: 'Consolas', monospace;
+        }
+        .remove-btn {
+            background-color: #d13438;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .remove-btn:hover {
+            background-color: #a72b2e;
+        }
+        #status {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 3px;
+            display: none;
+        }
+        #status.success {
+            background-color: #dff6dd;
+            color: #107c10;
+            border: 1px solid #107c10;
+        }
+        #status.error {
+            background-color: #fde7e9;
+            color: #a80000;
+            border: 1px solid #a80000;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Excel Model Tracker</h1>
+
+        <div id="modelInfo" class="section hidden">
+            <h2>Current Model</h2>
+            <div class="info">
+                <p><strong>Name:</strong> <span id="currentModelName">-</span></p>
+                <p><strong>Model ID:</strong> <span id="currentModelId">-</span></p>
+                <p><strong>Version:</strong> <span id="currentVersion">-</span></p>
+            </div>
+        </div>
+
+        <div id="registerSection" class="section">
+            <h2>Register New Model</h2>
+            <div class="form-group">
+                <label for="modelName">Model Name:</label>
+                <input type="text" id="modelName" placeholder="Enter model name">
+            </div>
+            <button id="registerBtn">Register Model</button>
+        </div>
+
+        <div id="trackedRangesSection" class="section">
+            <h2>Tracked Ranges</h2>
+            <div id="trackedRangesList"></div>
+            <div class="form-group">
+                <label for="rangeName">Range Name:</label>
+                <input type="text" id="rangeName" placeholder="e.g., InputParameters">
+            </div>
+            <div class="form-group">
+                <label for="rangeAddress">Range Address:</label>
+                <input type="text" id="rangeAddress" placeholder="e.g., Sheet1!A1:B10">
+            </div>
+            <button id="addRangeBtn">Add Tracked Range</button>
+            <button id="updateModelBtn" class="hidden">Update Model</button>
+        </div>
+
+        <div class="section">
+            <h2>Actions</h2>
+            <button id="loadModelBtn">Load Model from Workbook</button>
+            <button id="refreshBtn">Refresh Display</button>
+        </div>
+
+        <div id="status"></div>
+    </div>
+</body>
+</html>
