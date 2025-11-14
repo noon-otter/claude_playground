@@ -1,0 +1,39 @@
+{
+  "name": "excel-model-tracker",
+  "version": "1.0.0",
+  "description": "Excel Add-in for model tracking with versioning",
+  "main": "index.js",
+  "scripts": {
+    "build": "webpack --mode production",
+    "build:dev": "webpack --mode development",
+    "dev-server": "webpack serve --mode development",
+    "start": "office-addin-debugging start manifest.xml",
+    "stop": "office-addin-debugging stop manifest.xml",
+    "validate": "office-addin-manifest validate manifest.xml",
+    "sideload": "office-addin-debugging start manifest.xml desktop"
+  },
+  "keywords": ["office-add-in"],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "core-js": "^3.36.0",
+    "regenerator-runtime": "^0.14.1"
+  },
+  "devDependencies": {
+    "@types/office-js": "^1.0.391",
+    "@types/office-runtime": "^1.0.35",
+    "copy-webpack-plugin": "^12.0.2",
+    "html-loader": "^5.0.0",
+    "html-webpack-plugin": "^5.6.0",
+    "office-addin-debugging": "^5.1.9",
+    "office-addin-dev-certs": "^1.13.5",
+    "office-addin-lint": "^2.3.5",
+    "office-addin-manifest": "^1.13.7",
+    "source-map-loader": "^5.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.90.1",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
+  }
+}

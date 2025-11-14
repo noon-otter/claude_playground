@@ -1,0 +1,46 @@
+# Node modules
+node_modules/
+frontend/node_modules/
+
+# Build output
+dist/
+frontend/dist/
+*.log
+
+# Environment files
+.env
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/__pycache__/
+venv/
+env/
+ENV/
+
+# Office Add-in
+*.OfficeAddin
+
+# Docker
+.docker/
+
+# Certificates
+certs/
+*.pem
+*.key
+*.crt
