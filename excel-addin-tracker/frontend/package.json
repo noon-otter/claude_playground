@@ -10,7 +10,9 @@
     "start": "office-addin-debugging start manifest.xml",
     "stop": "office-addin-debugging stop manifest.xml",
     "validate": "office-addin-manifest validate manifest.xml",
-    "sideload": "office-addin-debugging start manifest.xml desktop"
+    "sideload": "office-addin-debugging start manifest.xml desktop",
+    "generate-icons": "node generate-icons.js",
+    "postinstall": "node generate-icons.js"
   },
   "keywords": ["office-add-in"],
   "author": "Your Name",
