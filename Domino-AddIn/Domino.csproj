@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <RootNamespace>Domino</RootNamespace>
+    <AssemblyName>Domino</AssemblyName>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>1.0.0</Version>
+    <Authors>Your Organization</Authors>
+    <Company>Your Organization</Company>
+    <Product>Domino Excel Add-In</Product>
+    <Description>Excel cell change tracking add-in for financial services compliance and auditing</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Excel-DNA Core Packages -->
+    <PackageReference Include="ExcelDna.AddIn" Version="1.7.0" />
+    <PackageReference Include="ExcelDna.Integration" Version="1.7.0" />
+
+    <!-- Logging -->
+    <PackageReference Include="NLog" Version="5.2.8" />
+    <PackageReference Include="NLog.Schema" Version="5.2.8" />
+
+    <!-- Excel Interop for event handling -->
+    <PackageReference Include="Microsoft.Office.Interop.Excel" Version="15.0.4795.1001" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Domino-AddIn.dna" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="NLog.config" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="RibbonUI.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

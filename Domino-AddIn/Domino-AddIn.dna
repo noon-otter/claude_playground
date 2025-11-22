@@ -1,0 +1,38 @@
+<DnaLibrary Name="Domino Add-In" RuntimeVersion="v4.0" Language="CS">
+  <ExternalLibrary Path="Domino.dll" ExplicitExports="false" LoadFromBytes="true" Pack="true" />
+
+  <!-- Custom Ribbon UI -->
+  <CustomUI>
+    <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui" loadImage="LoadImage">
+      <ribbon startFromScratch="false">
+        <tabs>
+          <tab id="DominoTab" label="Domino">
+            <group id="DominoGroup" label="Cell Tracking">
+              <labelControl id="TrackingStatus" label="Tracking Active" />
+              <labelControl id="LastChangeLabel" label="Last Change:" />
+              <labelControl id="LastChangeTimestamp" getLabel="GetLastChangeTimestamp" />
+              <button id="RefreshTimestamp"
+                      label="Refresh"
+                      size="normal"
+                      onAction="RefreshTimestamp"
+                      imageMso="Refresh" />
+            </group>
+            <group id="DominoInfo" label="Information">
+              <button id="ViewLogs"
+                      label="View Logs"
+                      size="normal"
+                      onAction="OpenLogFile"
+                      imageMso="FileOpen" />
+              <button id="About"
+                      label="About"
+                      size="normal"
+                      onAction="ShowAbout"
+                      imageMso="Info" />
+            </group>
+          </tab>
+        </tabs>
+      </ribbon>
+    </customUI>
+  </CustomUI>
+
+</DnaLibrary>
